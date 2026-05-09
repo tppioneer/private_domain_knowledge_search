@@ -1,0 +1,8 @@
+__pycache__
+.claude
+.idea
+.vscode
+*.pyc
+*.pyo
+*.pyd
+.venv
