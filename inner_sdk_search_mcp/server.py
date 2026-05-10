@@ -12,8 +12,7 @@
 
 from __future__ import annotations
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
+from mcp.server.fastmcp import FastMCP
 
 from .config import server_config
 from .models.schemas import (
@@ -49,7 +48,7 @@ class PrivateKnowledgeMCPServer:
     def __init__(self, search_engine: SearchEngine, knowledge_base: KnowledgeBase):
         self.search_engine = search_engine
         self.knowledge_base = knowledge_base
-        self.server = Server(server_config.name)
+        self.server = FastMCP(server_config.name)
 
         self._register_tools()
 
@@ -160,8 +159,7 @@ class PrivateKnowledgeMCPServer:
             return result.model_dump()
 
     async def run(self):
-        async with stdio_server() as (reader, writer):
-            await self.server.run(reader, writer, self.server.create_initialization_options())
+        await self.server.run_stdio_async()
 
 
 def create_server(

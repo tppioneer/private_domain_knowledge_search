@@ -9,10 +9,12 @@ from pydantic import BaseModel, Field
 class KnowledgeType(str, Enum):
     TERM = "term"
     API = "api"
+    DOCUMENT = "document"
     BEST_PRACTICE = "best_practice"
     DEFECT_HISTORY = "defect_history"
     SECURITY_RULE = "security_rule"
     TEST_TEMPLATE = "test_template"
+    SPEC = "spec"
 
 
 class FeedbackAction(str, Enum):

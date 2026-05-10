@@ -13,6 +13,8 @@ _TYPE_BOOST: dict[str, float] = {
     "term": 0.80,
     "spec": 0.95,
     "test_template": 0.75,
+    "document": 0.90,
+    "spec": 0.95,
 }
 
 

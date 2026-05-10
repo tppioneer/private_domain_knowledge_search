@@ -80,10 +80,19 @@ def _format_knowledge_item(item: dict, index: int) -> str:
         "security_rule": "安全规则",
         "spec": "规范契约",
         "test_template": "测试模板",
+        "document": "文档",
+        "spec": "规范契约",
     }
     label = type_labels.get(item_type, item_type)
 
-    lines = [f"### [{label}] (score: {item.get('score', 0):.2f})"]
+    source_badge = ""
+    knowledge_source = meta.get("knowledge_source", "")
+    if knowledge_source == "sdk_code":
+        source_badge = " [SDK源码]"
+    elif knowledge_source == "doc":
+        source_badge = " [文档]"
+
+    lines = [f"### [{label}]{source_badge} (score: {item.get('score', 0):.2f})"]
     lines.append(content)
 
     code_example = meta.get("code_example", "")
@@ -168,30 +177,50 @@ def assemble_sections(
 
     # ── Background ──
     remaining = token_budget - system_tokens - constraint_tokens - 200  # 预留 user 段
-    groups = _group_and_sort(items)
+    sdk_items = [i for i in items if i.get("meta", {}).get("knowledge_source") == "sdk_code"]
+    doc_items = [i for i in items if i.get("meta", {}).get("knowledge_source") != "sdk_code"]
 
     background_parts = [_BACKGROUND_PREAMBLE]
     current_tokens = _estimate_tokens(_BACKGROUND_PREAMBLE)
     truncated = 0
 
-    for item_type in sorted(groups.keys(), key=_group_key):
-        item_list = groups[item_type]
-        for i, item in enumerate(item_list):
+    # SDK 源码优先（更可靠、更紧凑）
+    if sdk_items:
+        background_parts.append("### 方法签名（SDK 源码）\n")
+        current_tokens += _estimate_tokens(background_parts[-1])
+        for i, item in enumerate(sdk_items):
             formatted = _format_knowledge_item(item, i + 1)
             item_tokens = _estimate_tokens(formatted)
             if current_tokens + item_tokens > remaining * 0.8:
-                truncated += len(item_list) - i
-                for remaining_type in sorted(groups.keys()):
-                    if remaining_type > item_type:
-                        truncated += len(groups[remaining_type])
-                background_parts.append(
-                    f"\n[以下 {truncated} 条知识因 token 预算限制省略]\n"
-                )
+                truncated += len(sdk_items) - i
+                background_parts.append(f"\n[以下 {truncated} 条知识因 token 预算限制省略]\n")
                 break
             background_parts.append(formatted)
             current_tokens += item_tokens
-        if truncated > 0:
-            break
+
+    # 文档内容补充（背景、用法、FAQ）
+    if doc_items and truncated == 0:
+        background_parts.append("\n### 参考文档\n")
+        current_tokens += _estimate_tokens(background_parts[-1])
+        groups = _group_and_sort(doc_items)
+        for item_type in sorted(groups.keys(), key=_group_key):
+            item_list = groups[item_type]
+            for i, item in enumerate(item_list):
+                formatted = _format_knowledge_item(item, i + 1)
+                item_tokens = _estimate_tokens(formatted)
+                if current_tokens + item_tokens > remaining * 0.8:
+                    truncated += len(item_list) - i
+                    for remaining_type in sorted(groups.keys()):
+                        if remaining_type > item_type:
+                            truncated += len(groups[remaining_type])
+                    background_parts.append(
+                        f"\n[以下 {truncated} 条知识因 token 预算限制省略]\n"
+                    )
+                    break
+                background_parts.append(formatted)
+                current_tokens += item_tokens
+            if truncated > 0:
+                break
 
     background = "\n".join(background_parts)
 

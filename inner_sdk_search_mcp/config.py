@@ -6,7 +6,7 @@ import os
 
 
 class ServerConfig:
-    name: str = "private-knowledge-mcp"
+    name: str = "inner-sdk-search-mcp"
     version: str = "0.2.0"
     description: str = "私域知识自动检索 MCP Server —— 为 AI Coding 工具提供企业私域知识检索能力"
 

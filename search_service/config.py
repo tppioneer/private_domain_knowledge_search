@@ -10,6 +10,14 @@ class ServiceConfig:
     host: str = os.getenv("SEARCH_HOST", "0.0.0.0")
     port: int = int(os.getenv("SEARCH_PORT", "8080"))
 
+    # 后端模式: "lightweight" | "production"
+    backend_mode: str = os.getenv("BACKEND_MODE", "lightweight")
+
+    # 轻量模式路径
+    sqlite_db_path: str = os.getenv("SQLITE_DB_PATH", "./data/knowledge.db")
+    faiss_index_dir: str = os.getenv("FAISS_INDEX_DIR", "./data/faiss")
+    graph_storage_path: str = os.getenv("GRAPH_STORAGE_PATH", "./data/graph.json")
+
     # Elastisearch
     es_hosts: list[str] = os.getenv("ES_HOSTS", "").split(",") if os.getenv("ES_HOSTS") else ["http://localhost:9200"]
     es_index: str = os.getenv("ES_INDEX", "private_knowledge")

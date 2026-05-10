@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ..models.schemas import KnowledgeItem, KnowledgeMeta, KnowledgeType, SearchContext
-from ..config import service_config
+from ....models.schemas import KnowledgeItem, KnowledgeMeta, KnowledgeType, SearchContext
+from ....config import service_config
 
 
 class GraphSearcher:
@@ -39,7 +39,6 @@ class GraphSearcher:
             return []
 
         try:
-            # 根据查询中的实体名查找关联的 API、文档、规范
             cypher = """
             MATCH (n)
             WHERE n.name CONTAINS $keyword

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ..models.schemas import KnowledgeItem, KnowledgeMeta, KnowledgeType, SearchContext
-from ..config import service_config
+from ....models.schemas import KnowledgeItem, KnowledgeMeta, KnowledgeType, SearchContext
+from ....config import service_config
 
 
 class BM25Searcher:

@@ -41,6 +41,69 @@
 [运营反馈闭环]
   会话记录采集 → 知识质量评估 → 人工审核确认 → 反馈至知识加工层
 ```
+### 2.3 数据流转图
+```mermaid
+flowchart TB
+    subgraph Source["数据源层"]
+        A1["业务需求文档"]
+        A2["API/SDK文档"]
+        A3["代码仓库"]
+        A4["历史工单/经验"]
+    end
+
+    subgraph Ingest["知识加工层"]
+        B1["文档解析与分块"]
+        B2["代码结构分析/AST"]
+        B3["语义向量化 Embedding"]
+        B4["知识图谱构建"]
+        B5["增量知识提炼 Agent"]
+    end
+
+    subgraph Store["知识存储层"]
+        C1[("向量数据库<br/>Milvus/ES")]
+        C2[("全文检索引擎<br/>Elasticsearch")]
+        C3[("图数据库<br/>Neo4j")]
+        C4[("结构化知识库<br/>术语/规范")]
+    end
+
+    subgraph Retrieve["检索与生成层"]
+        D1["混合检索引擎<br/>BM25 + 向量相似度 + 图遍历"]
+        D2["MCP Server 协议层"]
+        D3["上下文组装与重排序"]
+        D4["多阶段 Prompt 组装"]
+    end
+
+    subgraph App["AI Coding 工具"]
+        E1["IDE 插件对话"]
+        E2["需求开发"]
+        E3["问题定位"]
+        E4["代码检视"]
+    end
+
+    A1 & A2 & A3 & A4 --> B1
+    B1 --> B2 & B3
+    A3 --> B2
+    B2 --> B4
+    B2 & B3 --> C1 & C2
+    B4 --> C3
+    A4 --> B5
+    B5 --> C4
+    C1 & C2 & C3 & C4 --> D1
+    D1 --> D3 --> D4
+    D1 & C4 --> D2
+    D2 <--> E1
+    D4 --> E2 & E3 & E4
+
+    subgraph Feedback["运营反馈闭环"]
+        F1["会话记录采集"]
+        F2["知识质量评估"]
+        F3["人工审核确认"]
+    end
+
+    E1 --> F1 --> F2
+    F2 --> F3
+    F3 --> B5
+```
 
 ---
 
@@ -220,6 +283,24 @@ User Request:
 Generated Code:
 (根据上述上下文生成代码，包含幂等性检查、异常处理日志)
 ```
+
+---
+
+## 11. 实现待办跟踪
+
+以下为试点阶段已识别但尚未实施的事项：
+
+| 编号 | 事项 | 描述 | 优先级 |
+|------|------|------|--------|
+| P1 | 企业私域数据准备 | 梳理试点业务域的知识资产：SDK 源码（Java/Python 多仓）、API 文档（JSON 数组 + MD 混合）、Spec 契约文件 | HIGH |
+| P2 | JSON API 文档 loader | `pipeline/loader.py` 新增 JSON 数组展开逻辑，将每个 API 条目映射为独立 chunk，字段映射支持可配置 | MEDIUM |
+| P3 | Python SDK AST 解析 | 参照 `code_parser.py` 的 Java 实现，用 `ast` 标准库解析 Python 源码，提取 `setup.py`/`pyproject.toml` 包名版本 | MEDIUM |
+| P4 | LLM 文档分类 | 替换 `pipeline/classifier.py` 的规则匹配：将文档前 N 行送入大模型，返回分类标签 + API 章节边界，详见 classifier.py 头部 TODO | MEDIUM |
+| P5 | 生产后端部署对接 | 部署 Docker 环境（ES + Milvus + Neo4j），切换 `BACKEND_MODE=production`，验证 engine 三路检索；提供 `docker-compose.yml` | MEDIUM |
+| P6 | 增量更新管道 | Pipeline 当前全量覆写。需支持 source_path → chunk_id 映射，对比文件修改时间，仅重处理变更文件 | LOW |
+| P7 | orchestrator 生产模式适配 | 当前 `orchestrator.py` 绕过 factory 直接实例化 Lite* 类，生产模式下需调整为通过 factory 获取实例 | LOW |
+| P8 | 全链路端到端验证 | 用企业真实数据跑通：数据导入 → 索引 → Search Service 检索 → MCP Server → assembled prompt 输出 | HIGH |
+| P9 | 反馈闭环权重调整 | 当前 `report_feedback` 仅记录 feedback_id（`search_service/api/feedback.py`）。需实现：根据 rejected/modified 次数下调知识片段权重，accepted 提升优先级；修改详情提炼为新最佳实践。对应 requirement.md 第 6.3 节 | MEDIUM |
 
 --- 
 

@@ -6,9 +6,7 @@ import asyncio
 
 from ..config import service_config
 from ..models.schemas import Diagnostics, KnowledgeItem, KnowledgeType, SearchContext
-from .bm25 import BM25Searcher
-from .vector import VectorSearcher
-from .graph import GraphSearcher
+from .factory import create_bm25_searcher, create_vector_searcher, create_graph_searcher
 from .ranker import rerank
 
 
@@ -19,9 +17,9 @@ class HybridSearcher:
     """
 
     def __init__(self):
-        self.bm25 = BM25Searcher()
-        self.vector = VectorSearcher()
-        self.graph = GraphSearcher()
+        self.bm25 = create_bm25_searcher()
+        self.vector = create_vector_searcher()
+        self.graph = create_graph_searcher()
 
     async def search(
         self,
