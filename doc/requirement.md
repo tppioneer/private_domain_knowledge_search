@@ -301,6 +301,7 @@ Generated Code:
 | P7 | orchestrator 生产模式适配 | 当前 `orchestrator.py` 绕过 factory 直接实例化 Lite* 类，生产模式下需调整为通过 factory 获取实例 | LOW |
 | P8 | 全链路端到端验证 | 用企业真实数据跑通：数据导入 → 索引 → Search Service 检索 → MCP Server → assembled prompt 输出 | HIGH |
 | P9 | 反馈闭环权重调整 | 当前 `report_feedback` 仅记录 feedback_id（`search_service/api/feedback.py`）。需实现：根据 rejected/modified 次数下调知识片段权重，accepted 提升优先级；修改详情提炼为新最佳实践。对应 requirement.md 第 6.3 节 | MEDIUM |
+| P10 | MCP 工具触发率优化 | 当前工具描述已添加中文关键词和触发场景（`inner_sdk_search_mcp/server.py`）。后续优化方向：(1) 在 IDE system prompt 中注入指令——"当用户询问内部SDK、企业私有组件时，必须先调用 search_private_knowledge"；(2) 基于 `recommend_context` 在会话启动时预热项目骨架知识，让 LLM 在用户提问前就感知到可用内部 SDK 列表 | MEDIUM |
 
 --- 
 

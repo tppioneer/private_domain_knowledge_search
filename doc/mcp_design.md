@@ -8,6 +8,7 @@
 | v1.1 | 2026-05-10 | 新增assemble_prompt工具，补充Prompt组装流水线详细设计 |
 | v1.2 | 2026-05-10 | 引入Search Service微服务架构，新增auto_assemble参数、Remote引擎切换、KnowledgeType.document |
 | v1.3 | 2026-05-10 | assemble_prompt来源感知分组：SDK源码 vs 文档分开展示，knowledge_source字段 |
+| v1.4 | 2026-05-11 | 工具描述优化：添加中文触发关键词和场景说明；包更名为 inner-sdk-search-mcp |
 
 ---
 
@@ -454,6 +455,35 @@ export SEARCH_SERVICE_URL=http://localhost:8080
 ```
 
 MCP Server 内部通过 `config.py` 的 `search_service_url` 配置项和 `create_server()` 工厂函数实现自动切换，无需修改代码。
+
+---
+
+## 7.2 工具触发策略（v1.4）
+
+LLM 是否调用 MCP 工具取决于工具描述的质量。每个工具在 `server.py` 中注册时携带 `description` 参数，明确告知 LLM 触发场景。
+
+### 7.2.1 search_private_knowledge 的触发指南
+
+```python
+description="""搜索企业私域知识库，查找内部SDK的API签名、使用示例和最佳实践。
+
+【何时必须调用此工具】
+- 用户提到内部SDK、私有SDK、公司自研组件、内部工具类时
+- 用户提到具体的工具类名（如 FileManager、PointsFactory、GamClient 等）
+- 用户需要"对接"、"接入"、"封装"、"调用"某个内部SDK
+- 用户问到某个内部API的方法签名、参数、返回值
+
+【触发关键词】内部SDK、私有SDK、自研、工具类、封装、对接、接入、
+怎么用、方法签名、com.、Factory、Manager、Helper"""
+```
+
+### 7.2.2 触发率优化方向
+
+| 策略 | 当前状态 | 说明 |
+|------|----------|------|
+| 工具描述关键词 | 已实现 | 中文触发词 + 场景说明，覆盖常见提问模式 |
+| IDE system prompt 注入 | TODO | 在 IDE 的 system prompt 中注入指令——"当用户询问内部SDK时必须先搜索" |
+| 会话启动预热 | TODO | 利用 `recommend_context` 在会话启动时注入项目可用 SDK 列表，让 LLM 提前感知 |
 
 ---
 

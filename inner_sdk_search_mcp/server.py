@@ -57,7 +57,19 @@ class PrivateKnowledgeMCPServer:
         engine = self.search_engine
         kb = self.knowledge_base
 
-        @s.tool()
+        @s.tool(
+            name="search_private_knowledge",
+            description="""搜索企业私域知识库，查找内部SDK的API签名、使用示例和最佳实践。
+
+【何时必须调用此工具】
+- 用户提到内部SDK、私有SDK、公司自研组件、内部工具类时
+- 用户提到具体的工具类名（如 FileManager、PointsFactory、GamClient 等）
+- 用户需要"对接"、"接入"、"封装"、"调用"某个内部SDK
+- 用户问到某个内部API的方法签名、参数、返回值
+- 用户需要了解企业内部编码规范或历史缺陷记录
+
+【触发关键词】内部SDK、私有SDK、自研、工具类、封装、对接、接入、怎么用、方法签名、com.、Factory、Manager、Helper""",
+        )
         async def search_private_knowledge_tool(
             query: str,
             context: dict | None = None,
@@ -81,7 +93,11 @@ class PrivateKnowledgeMCPServer:
             )
             return result.model_dump()
 
-        @s.tool()
+        @s.tool(
+            name="get_entity_detail",
+            description="""精确查询某个SDK类、API方法或企业术语的完整定义、参数说明和代码示例。
+使用时机：用户明确提到某个实体名称时（如"FileManager是什么"、"DeductPoints参数有哪些"）。""",
+        )
         async def get_entity_detail_tool(
             entity_name: str,
             entity_type: str | None = None,
@@ -96,7 +112,10 @@ class PrivateKnowledgeMCPServer:
             )
             return result.model_dump()
 
-        @s.tool()
+        @s.tool(
+            name="get_applicable_spec",
+            description="""获取当前项目模块必须遵守的编码规范和数据契约。使用时机：用户生成代码前需要确认规范约束，或代码审查时检查合规性。""",
+        )
         async def get_applicable_spec_tool(
             module: str | None = None,
             file_path: str | None = None,
@@ -110,7 +129,11 @@ class PrivateKnowledgeMCPServer:
             )
             return result.model_dump()
 
-        @s.tool()
+        @s.tool(
+            name="recommend_context",
+            description="""根据项目元信息预加载高频知识骨架（架构概览、常用API列表、安全白名单）。
+使用时机：IDE首次连接时自动调用，或项目依赖变更时手动刷新。""",
+        )
         async def recommend_context_tool(
             project_meta: dict,
         ) -> dict:
@@ -121,7 +144,10 @@ class PrivateKnowledgeMCPServer:
             )
             return result.model_dump()
 
-        @s.tool()
+        @s.tool(
+            name="report_feedback",
+            description="""上报用户对注入知识的采纳/拒绝反馈，用于优化检索排序。使用时机：用户采纳或修改了MCP提供的知识后。""",
+        )
         async def report_feedback_tool(
             session_id: str,
             consumed_knowledge_ids: list[str],
@@ -136,7 +162,10 @@ class PrivateKnowledgeMCPServer:
             )
             return result.model_dump()
 
-        @s.tool()
+        @s.tool(
+            name="assemble_prompt",
+            description="""将多来源检索结果清洗、去重、组装为结构化的Prompt。使用时机：search_private_knowledge 返回结果后，可以用此工具组装完整的上下文Prompt；或设置 search_private_knowledge 的 auto_assemble=true 自动组装。""",
+        )
         async def assemble_prompt_tool_handler(
             user_query: str,
             context: dict | None = None,
