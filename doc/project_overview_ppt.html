@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>私域知识赋能 AI Coding · 技术方案</title>
+<link rel="stylesheet" href="../.claude/skills/html-ppt-skill-main/assets/fonts.css">
+<link rel="stylesheet" href="../.claude/skills/html-ppt-skill-main/assets/base.css">
+<link rel="stylesheet" href="../.claude/skills/html-ppt-skill-main/assets/animations/animations.css">
+<link rel="stylesheet" href="../.claude/skills/html-ppt-skill-main/assets/themes/engineering-whiteprint.css" id="theme-link">
+<style>
+.eng-deck{font-family:'Inter','Noto Sans SC',sans-serif}
+.eng-deck .slide{padding:60px 80px}
+.eng-deck .h1{font-size:64px;line-height:1.05;font-weight:800;letter-spacing:-.03em}
+.eng-deck .h2{font-size:42px;font-weight:700;letter-spacing:-.02em}
+.eng-deck .kicker{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;text-transform:none;letter-spacing:.02em;opacity:.6}
+.eng-deck .mono{font-family:'JetBrains Mono','IBM Plex Mono',monospace}
+.eng-deck .terminal{background:#1a1a2e;border-radius:12px;overflow:hidden;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;box-shadow:0 8px 32px rgba(0,0,0,.15)}
+.eng-deck .terminal .bar{display:flex;align-items:center;gap:6px;padding:8px 14px;background:#16162a;font-size:11px;opacity:.6}
+.eng-deck .terminal .dot{width:10px;height:10px;border-radius:50%;background:#ff5f56}
+.eng-deck .terminal .dot:nth-child(2){background:#ffbd2e}.eng-deck .terminal .dot:nth-child(3){background:#27c93f}
+.eng-deck .terminal pre{margin:0;padding:18px 22px;color:#e6edf3;max-height:360px;overflow:auto}
+.eng-deck .kw{color:#ff7b72}.eng-deck .fn{color:#d2a8ff}.eng-deck .str{color:#a5d6ff}.eng-deck .cmt{color:#6e7681;font-style:italic}
+.eng-deck .card{border-radius:12px;padding:20px 24px;border:1px solid var(--border-soft, #e2e8f0)}
+.eng-deck .card-accent{border-left:4px solid var(--accent,#2563eb)}
+.eng-deck .tag{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;border:1px solid var(--border-soft,#ddd)}
+.eng-deck .agenda-row{display:flex;align-items:baseline;gap:20px;padding:14px 0;border-bottom:1px dashed var(--border-soft,#e5e7eb)}
+.eng-deck .agenda-row .num{flex:none;width:40px;font-family:'JetBrains Mono',monospace;font-weight:700}
+.eng-deck .agenda-row .t{flex:1;font-size:18px;font-weight:600}
+.eng-deck .agenda-row .d{font-size:12px;opacity:.5;font-family:'JetBrains Mono',monospace}
+.eng-deck .arch-box{display:inline-flex;align-items:center;justify-content:center;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;white-space:nowrap}
+.eng-deck .arch-arrow{font-size:20px;margin:0 12px}
+.eng-deck .badge-sdk{background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:12px}
+.eng-deck .badge-doc{background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:12px}
+.eng-deck .flow-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-family:'JetBrains Mono',monospace;font-size:14px;padding:16px 0}
+.eng-deck .flow-node{padding:8px 16px;border-radius:8px;background:var(--surface,#f8fafc);border:1px solid var(--border-soft,#e2e8f0);font-weight:600}
+.eng-deck .flow-arrow{opacity:.4;font-size:18px}
+</style>
+</head>
+<body class="eng-deck">
+<div class="deck">
+
+<!-- 1. Cover -->
+<section class="slide" data-title="Cover">
+  <p class="kicker">private-knowledge-search / 2026-05</p>
+  <h1 class="h1 anim-fade-up" data-anim="fade-up">私域知识赋能<br><span style="background:linear-gradient(120deg,#2563eb,#7c3aed);-webkit-background-clip:text;background-clip:text;color:transparent">AI Coding 工具</span></h1>
+  <p class="lede mt-m" style="font-size:18px;line-height:1.6;max-width:640px">Spec + RAG 双引擎 · 六大 MCP 工具 · 工厂模式双后端<br>从"通用码农"到"业务专家型 Copilot"</p>
+  <div class="row mt-l" style="gap:12px">
+    <span class="tag">MCP Server</span><span class="tag">Search Service</span>
+    <span class="tag">混合检索</span><span class="tag">Prompt 组装</span>
+  </div>
+  <div class="deck-footer"><span class="mono">#rag #mcp #private-knowledge</span><span class="slide-number" data-current="1" data-total="15"></span></div>
+</section>
+
+<!-- 2. Agenda -->
+<section class="slide" data-title="Agenda">
+  <p class="kicker">agenda.md</p>
+  <h2 class="h2">路线图</h2>
+  <div class="stack mt-l">
+    <div class="agenda-row"><span class="num">01</span><span class="t">项目背景 &amp; 问题定义</span><span class="d">P1-2</span></div>
+    <div class="agenda-row"><span class="num">02</span><span class="t">技术架构：Spec + RAG 双引擎</span><span class="d">P3-4</span></div>
+    <div class="agenda-row"><span class="num">03</span><span class="t">知识分类 &amp; 数据预处理管道</span><span class="d">P5-8</span></div>
+    <div class="agenda-row"><span class="num">04</span><span class="t">MCP Server：6 大工具 + Prompt 组装</span><span class="d">P9-11</span></div>
+    <div class="agenda-row"><span class="num">05</span><span class="t">Search Service + 混合检索引擎</span><span class="d">P12-13</span></div>
+    <div class="agenda-row"><span class="num">06</span><span class="t">实施路径 &amp; 待办 &amp; 总结</span><span class="d">P14-15</span></div>
+  </div>
+</section>
+
+<!-- 3. 项目背景 -->
+<section class="slide" data-title="Background">
+  <p class="kicker">// problem</p>
+  <h2 class="h2">通用 AI 编程模型的<br>三个盲区</h2>
+  <div class="grid g3 mt-l">
+    <div class="card card-accent">
+      <h4>术语黑盒</h4>
+      <p style="opacity:.7;font-size:14px;line-height:1.6">"积分扣减"、"幂等键"、"GAM 回调"——企业术语对通用 LLM 只是字符串，无法映射到内部 SDK。</p>
+      <span class="tag mt-s" style="margin-top:12px">63% 开发者有此感受</span>
+    </div>
+    <div class="card card-accent">
+      <h4>返工率高</h4>
+      <p style="opacity:.7;font-size:14px;line-height:1.6">开发者平均需要 5 轮以上修改才能获得可用代码。签名过时、参数错误、漏掉配置。</p>
+      <span class="tag mt-s" style="margin-top:12px">5+ 轮/需求</span>
+    </div>
+    <div class="card card-accent">
+      <h4>规范缺失</h4>
+      <p style="opacity:.7;font-size:14px;line-height:1.6">模型不了解团队编码规范、历史缺陷模式、架构决策，生成的代码"能用但不合群"。</p>
+      <span class="tag mt-s" style="margin-top:12px">项目级理解缺失</span>
+    </div>
+  </div>
+  <div class="card mt-l" style="background:var(--surface);padding:16px 24px">
+    <p style="font-weight:700;margin:0">目标：</p>
+    <p style="opacity:.8;margin:4px 0 0">AI 自动理解企业术语、API、规范与历史经验，在需求开发 / 问题定位 / 代码检视中提供精准生成与建议。</p>
+  </div>
+</section>
+
+<!-- 4. 技术架构 -->
+<section class="slide" data-title="Architecture">
+  <p class="kicker">// architecture</p>
+  <h2 class="h2">Spec + RAG 双引擎</h2>
+  <div class="grid g2 mt-l" style="align-items:start">
+    <div>
+      <div class="card card-accent" style="margin-bottom:16px">
+        <h4 style="margin-top:0">Spec 引擎</h4>
+        <p style="opacity:.7;font-size:14px;line-height:1.6">结构化规范契约作为硬约束，在生成前校验。接口契约 / 数据契约 / 行为规范 / 安全要求。</p>
+        <span class="tag">MUST obey</span>
+      </div>
+      <div class="card card-accent">
+        <h4 style="margin-top:0">RAG 引擎</h4>
+        <p style="opacity:.7;font-size:14px;line-height:1.6">语义检索动态注入非结构化知识。历史方案 / API 文档 / 最佳实践 / 缺陷记录。</p>
+        <span class="tag">SHOULD reference</span>
+      </div>
+    </div>
+    <div class="terminal">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>prompt template</span></div>
+<pre><span class="cmt">/* System: Spec 硬约束 */</span>
+<span class="kw">你是一个</span> 积分服务专家，严格遵循：
+- 积分变动必须记录 change_log 并返回流水号
+- 扣减必须传入幂等键 bizId+uid
+
+<span class="cmt">/* Background: RAG 注入 */</span>
+[API] <span class="fn">deduct</span>(bizId, uid, points) → changeId
+[BestPractice] 使用分布式锁防并发扣减
+[Defect] INC-4829: 未包事务导致少扣
+
+<span class="cmt">/* User Request */</span>
+实现积分扣减功能</pre>
+    </div>
+  </div>
+</section>
+
+<!-- 5. 系统架构图 -->
+<section class="slide" data-title="System Architecture">
+  <p class="kicker">// system-diagram</p>
+  <h2 class="h2">五层系统架构</h2>
+  <div class="stack mt-l" style="gap:6px;font-family:'JetBrains Mono',monospace;font-size:12px">
+    <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
+      <span class="arch-box" style="background:#dbeafe;color:#1e40af">📄 数据源层</span>
+      <span class="arch-arrow">↓</span>
+      <span class="arch-box" style="background:#e0e7ff;color:#3730a3">⚙️ 知识加工层</span>
+      <span class="arch-arrow">↓</span>
+      <span class="arch-box" style="background:#e0e7ff;color:#3730a3">🗄️ 存储层</span>
+      <span class="arch-arrow">↓</span>
+      <span class="arch-box" style="background:#fce7f3;color:#9d174d">🔍 检索引擎</span>
+      <span class="arch-arrow">↓</span>
+      <span class="arch-box" style="background:#fef3c7;color:#92400e">🖥️ MCP Server</span>
+    </div>
+  </div>
+  <div class="grid g3 mt-m" style="font-size:13px;line-height:1.7">
+    <div class="card"><b>数据源</b><br>需求文档 · API/SDK 文档 · 代码仓库 · 历史工单</div>
+    <div class="card"><b>知识加工</b><br>文档解析分块 · AST 分析 · 向量化 · 知识图谱构建</div>
+    <div class="card"><b>存储</b><br>Milvus/Qdrant · Elasticsearch · Neo4j · 结构化知识库</div>
+  </div>
+  <div class="grid g3 mt-s" style="font-size:13px;line-height:1.7">
+    <div class="card"><b>检索</b><br>BM25 + 向量 + 图遍历 → Cross-BERT 重排序 → MCP 协议暴露</div>
+    <div class="card"><b>消费</b><br>IDE 插件 → 需求开发 / 问题定位 / 代码检视</div>
+    <div class="card"><b>闭环</b><br>会话采集 → 质量评估 → 人工审核 → 反馈至加工层</div>
+  </div>
+</section>
+
+<!-- 6. 私域知识分类 -->
+<section class="slide" data-title="Knowledge Types">
+  <p class="kicker">// knowledge-taxonomy</p>
+  <h2 class="h2">四类私域知识</h2>
+  <div class="grid g2 mt-l" style="gap:20px">
+    <div class="card card-accent">
+      <h4>术语 / 业务词汇库</h4>
+      <p style="opacity:.7;font-size:14px">术语名、定义、适用场景、同义词、关联术语</p>
+      <div class="row mt-s" style="gap:6px"><span class="badge-sdk">幂等键</span><span class="badge-sdk">GAM 回调</span><span class="badge-sdk">bizId</span></div>
+    </div>
+    <div class="card card-accent">
+      <h4>SDK / API 文档库</h4>
+      <p style="opacity:.7;font-size:14px">接口签名、参数说明、返回值、示例代码、版本变更</p>
+      <div class="row mt-s" style="gap:6px"><span class="badge-doc">deduct()</span><span class="badge-doc">POST /api/v1/points</span></div>
+    </div>
+    <div class="card card-accent">
+      <h4>代码规范 &amp; 最佳实践</h4>
+      <p style="opacity:.7;font-size:14px">命名规则、异常处理模式、性能优化、Spec 契约文件</p>
+      <div class="row mt-s" style="gap:6px"><span class="tag">正例/反例</span><span class="tag">强制规范</span></div>
+    </div>
+    <div class="card card-accent">
+      <h4>历史上下文库</h4>
+      <p style="opacity:.7;font-size:14px">缺陷记录（现象/根因/方案）、架构评审、技术决策</p>
+      <div class="row mt-s" style="gap:6px"><span class="tag">INC-4829</span><span class="tag">根因分析</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. 数据预处理管道 -->
+<section class="slide" data-title="Pipeline">
+  <p class="kicker">// data-pipeline</p>
+  <h2 class="h2">数据预处理管道</h2>
+  <p class="lede" style="margin-bottom:20px">企业数据（MD / JSON / Java SDK）→ 加载 → 分类 → 分块 → AST 解析 → 索引</p>
+  <div class="flow-row" style="font-size:12px;gap:4px">
+    <span class="flow-node">loader</span><span class="flow-arrow">→</span>
+    <span class="flow-node">classifier</span><span class="flow-arrow">→</span>
+    <span class="flow-node">chunker</span><span class="flow-arrow">→</span>
+    <span class="flow-node">code_parser</span><span class="flow-arrow">→</span>
+    <span class="flow-node">orchestrator</span><span class="flow-arrow">→</span>
+    <span class="flow-node" style="background:#dbeafe">SQLite</span>
+    <span class="flow-node" style="background:#fce7f3">FAISS</span>
+    <span class="flow-node" style="background:#fef3c7">NetworkX</span>
+  </div>
+  <div class="grid g2 mt-l">
+    <div class="terminal">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>orchestrator output</span></div>
+<pre>pipeline start: data_dir=.
+loaded 8 doc files
+chunked into 10 doc chunks
+module points-sdk: 3 java files
+total java chunks: 6
+bm25 indexed: 16
+vector indexed: 16
+graph nodes: 16</pre>
+    </div>
+    <div class="stack" style="gap:12px;font-size:14px;line-height:1.6">
+      <div class="card card-accent"><b>loader</b> — glob 模式加载 .md / .py / .go / .java</div>
+      <div class="card card-accent"><b>classifier</b> — 目录 > 文件名 > 内容关键词 > 默认</div>
+      <div class="card card-accent"><b>chunker</b> — 语义边界 + 重叠窗口，3K-5K tokens</div>
+      <div class="card card-accent"><b>code_parser</b> — Java AST，pom.xml + Javadoc + 调用链</div>
+    </div>
+  </div>
+</section>
+
+<!-- 8. Chunker + Code Parser -->
+<section class="slide" data-title="Chunking + AST">
+  <p class="kicker">// chunker + code_parser</p>
+  <h2 class="h2">智能分块 &amp; SDK 解析</h2>
+  <div class="grid g2 mt-l" style="align-items:start">
+    <div>
+      <h4 style="margin-top:0">文档分块策略</h4>
+      <div class="card card-accent mt-s" style="font-size:14px;line-height:1.6">
+        <p>• 识别 <span class="mono">## API</span> 章节 → 按 <span class="mono">###</span> 子标题切分</p>
+        <p>• REST 端点提取 HTTP 方法 + URL 路径</p>
+        <p>• 普通文档：段落合并至 3K-10K 字符</p>
+        <p>• 块间重叠 ~300 tokens</p>
+        <p style="opacity:.6">• TODO: LLM 分类替代关键词匹配</p>
+      </div>
+      <div class="row mt-s" style="gap:6px">
+        <span class="badge-doc">[文档] 背景+FAQ</span>
+        <span class="badge-sdk">[REST] POST /api/v1/points/deduct</span>
+      </div>
+    </div>
+    <div>
+      <h4 style="margin-top:0">Java AST 解析</h4>
+      <div class="terminal mt-s">
+        <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>PointsClient.java</span></div>
+<pre><span class="cmt">/* pom.xml → {points-sdk, 2.3.0} */</span>
+<span class="kw">public</span> <span class="fn">String</span> <span class="fn">deduct</span>(
+    <span class="fn">String</span> bizId,
+    <span class="fn">String</span> uid,
+    <span class="kw">int</span> points
+) → changeId
+
+<span class="cmt">/* Javadoc */</span>
+积分扣减
+@param bizId 业务幂等键
+
+<span class="cmt">/* calls */</span>
+→ validateParams()</pre>
+      </div>
+      <p style="font-size:12px;opacity:.6;margin-top:8px">版本解析: .sdk-versions.json > pom 字面量 > 空兜底</p>
+    </div>
+  </div>
+</section>
+
+<!-- 9. MCP Tools Overview -->
+<section class="slide" data-title="MCP Tools">
+  <p class="kicker">// mcp-tools</p>
+  <h2 class="h2">MCP Server：六个标准化工具</h2>
+  <div class="grid g3 mt-l" style="gap:16px">
+    <div class="card card-accent"><h4 style="margin-top:0">🔍 search_private_knowledge</h4><p style="font-size:12px;opacity:.7">BM25+向量+图 混合检索<br>支持 auto_assemble</p><span class="tag">核心工具</span></div>
+    <div class="card card-accent"><h4 style="margin-top:0">📋 get_entity_detail</h4><p style="font-size:12px;opacity:.7">精确查询术语/API<br>完整定义与示例</p></div>
+    <div class="card card-accent"><h4 style="margin-top:0">📐 get_applicable_spec</h4><p style="font-size:12px;opacity:.7">获取适用规范契约<br>冲突检测</p></div>
+    <div class="card card-accent"><h4 style="margin-top:0">📦 recommend_context</h4><p style="font-size:12px;opacity:.7">项目上下文预加载<br>高频知识骨架</p></div>
+    <div class="card card-accent"><h4 style="margin-top:0">📝 report_feedback</h4><p style="font-size:12px;opacity:.7">上报采纳/拒绝反馈<br>驱动闭环优化</p></div>
+    <div class="card card-accent"><h4 style="margin-top:0">🧩 assemble_prompt</h4><p style="font-size:12px;opacity:.7">清洗→去重→组装<br>4 段式结构化 Prompt</p></div>
+  </div>
+</section>
+
+<!-- 10. search_private_knowledge -->
+<section class="slide" data-title="Search Tool">
+  <p class="kicker">// search_private_knowledge</p>
+  <h2 class="h2">核心工具：混合检索 + 自动组装</h2>
+  <div class="grid g2 mt-l" style="align-items:start">
+    <div>
+      <div class="card card-accent" style="font-size:14px;line-height:1.6">
+        <p><b>触发场景</b></p>
+        <p>• 用户提到内部SDK、工具类名</p>
+        <p>• "封装"、"对接"、"接入"</p>
+        <p>• Factory、Manager、Helper</p>
+      </div>
+      <div class="terminal mt-m">
+        <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>auto_assemble=true</span></div>
+<pre>{
+  "query": "FileManager 文件上传",
+  "auto_assemble": {
+    "enabled": true,
+    "include_specs": true,
+    "max_tokens": 4096
+  }
+}</pre>
+      </div>
+    </div>
+    <div class="stack" style="gap:12px;font-size:14px;line-height:1.6">
+      <div class="card"><b>返回结果</b><br>items: 方法签名 + Javadoc<br>diagnostics: scanned + time_ms<br>assembled_prompt: 完整 4 段式</div>
+      <div class="card"><b>来源分组</b><br><span class="badge-sdk">[SDK源码]</span> 精确签名<br><span class="badge-doc">[文档]</span> 背景用法</div>
+      <div class="card"><b>一次调用 = 检索 + 组装</b><br>减少 IDE ↔ MCP 往返次数</div>
+    </div>
+  </div>
+</section>
+
+<!-- 11. Prompt Assembly -->
+<section class="slide" data-title="Prompt Assembly">
+  <p class="kicker">// assemble_prompt</p>
+  <h2 class="h2">Prompt 组装流水线</h2>
+  <div class="flow-row" style="font-size:12px;gap:4px">
+    <span class="flow-node">安全清洗</span><span class="flow-arrow">→</span>
+    <span class="flow-node">去重</span><span class="flow-arrow">→</span>
+    <span class="flow-node">来源分组</span><span class="flow-arrow">→</span>
+    <span class="flow-node">排序</span><span class="flow-arrow">→</span>
+    <span class="flow-node">Token裁剪</span><span class="flow-arrow">→</span>
+    <span class="flow-node">4段式输出</span>
+  </div>
+  <div class="terminal mt-m">
+    <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>assembled prompt</span></div>
+<pre><span class="cmt">/* 1. SYSTEM — 角色 + 硬约束 */</span>
+<span class="kw">你是一个</span> 积分服务专家，严格遵循：
+- 积分变动必须记录 change_log 并返回流水号
+
+<span class="cmt">/* 2. BACKGROUND — 来源分组 */</span>
+### 方法签名（SDK 源码）
+[API] <span class="badge-sdk">[SDK源码]</span> <span class="fn">deduct</span>(bizId, uid, points)
+
+### 参考文档
+[API] <span class="badge-doc">[文档]</span> 积分扣减 API 说明
+
+<span class="cmt">/* 3. USER REQUEST */</span>
+<span class="kw">## 用户需求</span> 实现积分扣减功能
+
+<span class="cmt">/* 4. CONSTRAINTS */</span>
+<span class="kw">## 生成约束</span>
+- 版本要求: points-sdk v2.3.0</pre>
+  </div>
+</section>
+
+<!-- 12. Search Service -->
+<section class="slide" data-title="Search Service">
+  <p class="kicker">// search-service</p>
+  <h2 class="h2">Search Service：工厂模式双后端</h2>
+  <div class="grid g2 mt-l" style="align-items:start">
+    <div>
+      <h4 style="margin-top:0">部署拓扑</h4>
+      <div class="card card-accent mt-s" style="font-size:14px;line-height:1.7">
+        <p>IDE ← <b>stdio</b> → MCP Server</p>
+        <p style="padding-left:20px">← <b>HTTP</b> → Search Service</p>
+        <p style="padding-left:40px">← <b>本地/远程</b> → 后端</p>
+      </div>
+      <div class="row mt-m" style="gap:12px;font-size:13px">
+        <div class="card" style="flex:1;text-align:center"><b>lite</b><br>SQLite<br>FAISS<br>NetworkX<br><span class="tag" style="margin-top:8px">pip install</span></div>
+        <div style="align-self:center;font-size:24px">⇄</div>
+        <div class="card" style="flex:1;text-align:center"><b>production</b><br>Elasticsearch<br>Milvus<br>Neo4j<br><span class="tag" style="margin-top:8px">docker compose</span></div>
+      </div>
+    </div>
+    <div class="terminal">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>config</span></div>
+<pre><span class="cmt"># 默认轻量模式</span>
+BACKEND_MODE=lightweight
+uvicorn search_service.main:app
+
+<span class="cmt"># 生产模式</span>
+BACKEND_MODE=production
+docker compose up -d
+uvicorn search_service.main:app
+
+<span class="cmt"># 6 个 REST API</span>
+POST /api/v1/search
+GET  /api/v1/entities/{name}
+GET  /api/v1/specs
+POST /api/v1/recommend
+POST /api/v1/feedback
+GET  /health</pre>
+    </div>
+  </div>
+</section>
+
+<!-- 13. Hybrid Search Engine -->
+<section class="slide" data-title="Hybrid Search">
+  <p class="kicker">// hybrid-search</p>
+  <h2 class="h2">三路并行检索 + 融合重排序</h2>
+  <div class="flow-row" style="font-size:12px;gap:4px;justify-content:center">
+    <span class="flow-node" style="background:#dbeafe">BM25 (SQLite/ES)</span>
+    <span class="flow-node" style="background:#fce7f3">向量 (FAISS/Milvus)</span>
+    <span class="flow-node" style="background:#fef3c7">图 (NetworkX/Neo4j)</span>
+  </div>
+  <p style="text-align:center;font-size:20px;margin:8px 0">↓ asyncio.gather 并行 ↓</p>
+  <div class="flow-row" style="font-size:12px;gap:4px;justify-content:center">
+    <span class="flow-node">合并去重</span><span class="flow-arrow">→</span>
+    <span class="flow-node">重排序</span><span class="flow-arrow">→</span>
+    <span class="flow-node">Top-K 裁剪</span>
+  </div>
+  <div class="grid g2 mt-l">
+    <div class="card card-accent" style="font-size:13px;line-height:1.6">
+      <b>重排序权重</b>
+      <p>api 1.00 · best_practice 0.95 · spec 0.95<br>document 0.90 · defect_history 0.90<br>security_rule 0.85 · term 0.80</p>
+      <p style="opacity:.5;margin-top:8px">推广期 → Cross-BERT 模型</p>
+    </div>
+    <div class="card card-accent" style="font-size:13px;line-height:1.6">
+      <b>优雅降级</b>
+      <p>• 单路检索超时 300ms → 返回空<br>• 后端不可达 → 记录 warning<br>• 全空 → 回退 Mock 数据<br>• diagnostics.warnings 记录每路状态</p>
+    </div>
+  </div>
+</section>
+
+<!-- 14. Roadmap + TODOs -->
+<section class="slide" data-title="Roadmap">
+  <p class="kicker">// roadmap</p>
+  <h2 class="h2">实施路径 &amp; 待办跟踪</h2>
+  <div class="grid g2 mt-l" style="align-items:start">
+    <div>
+      <h4 style="margin-top:0">三阶段路线</h4>
+      <div class="stack mt-s" style="gap:8px;font-size:13px;line-height:1.6">
+        <div class="card card-accent"><b>试点期 1-2月</b><br>单业务域 RAG 链路 · MCP Server 接入 IDE · 采纳率验证</div>
+        <div class="card card-accent"><b>推广期 3-4月</b><br>多域扩展 · AST 图谱构建 · 运营反馈闭环</div>
+        <div class="card card-accent"><b>深化期 5-6月</b><br>全团队基线 · 重排序优化 · 增量预训练评估</div>
+      </div>
+    </div>
+    <div>
+      <h4 style="margin-top:0">待办 (HIGH/MEDIUM)</h4>
+      <div class="stack mt-s" style="gap:6px;font-size:12px;line-height:1.5">
+        <div class="card"><b>P1</b> 企业私域数据准备 <span class="tag" style="float:right">HIGH</span></div>
+        <div class="card"><b>P2</b> JSON API 文档 loader <span class="tag" style="float:right">MEDIUM</span></div>
+        <div class="card"><b>P4</b> LLM 文档分类 <span class="tag" style="float:right">MEDIUM</span></div>
+        <div class="card"><b>P5</b> 生产后端部署 (ES/Milvus/Neo4j) <span class="tag" style="float:right">MEDIUM</span></div>
+        <div class="card"><b>P8</b> 全链路 E2E 验证 <span class="tag" style="float:right">HIGH</span></div>
+        <div class="card"><b>P9</b> 反馈闭环权重调整 <span class="tag" style="float:right">MEDIUM</span></div>
+        <div class="card"><b>P10</b> MCP 工具触发率优化 <span class="tag" style="float:right">MEDIUM</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 15. Summary -->
+<section class="slide" data-title="Summary">
+  <p class="kicker">// summary</p>
+  <h2 class="h2">总结</h2>
+  <div class="grid g2 mt-l">
+    <div class="stack" style="gap:16px;font-size:14px;line-height:1.6">
+      <div class="card card-accent"><b>已完成</b><br>MCP Server 6 工具 · Prompt 组装 · Search Service · 工厂模式双后端 · 数据管道 · Java AST 解析</div>
+      <div class="card card-accent"><b>下一步</b><br>企业数据准备 → 全链路 E2E → 生产部署 → 反馈闭环</div>
+      <div class="card card-accent"><b>核心理念</b><br>Spec 硬约束 + RAG 软智能 = 从通用码农到业务专家 Copilot</div>
+    </div>
+    <div class="terminal">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>deploy</span></div>
+<pre><span class="cmt"># Search Service (服务器)</span>
+uvicorn search_service.main:app
+
+<span class="cmt"># MCP Server (开发者本机)</span>
+<span class="kw">export</span> SEARCH_SERVICE_URL=server:8080
+inner-sdk-search-mcp
+
+<span class="cmt"># OpenCode MCP 配置</span>
+{
+  "mcpServers": {
+    "inner-sdk-search-mcp": {
+      "command": "inner-sdk-search-mcp",
+      "env": { "SEARCH_SERVICE_URL": "..." }
+    }
+  }
+}</pre>
+    </div>
+  </div>
+  <div class="row mt-l" style="gap:8px;justify-content:center">
+    <span class="tag">doc/requirement.md</span>
+    <span class="tag">doc/mcp_design.md</span>
+    <span class="tag">doc/search_service_design.md</span>
+    <span class="tag">doc/pipeline_design.md</span>
+    <span class="tag">doc/deployment_guide.md</span>
+  </div>
+</section>
+
+</div>
+<script src="../.claude/skills/html-ppt-skill-main/assets/runtime.js"></script>
+</body></html>
