@@ -273,7 +273,6 @@ def _method_to_chunk(
 ) -> dict:
     params = _format_params(node.parameters)
     returns = node.return_type.name if node.return_type else "void"
-    signature = f"public {returns} {node.name}({params})"
 
     calls = _extract_calls(node)
 
@@ -286,7 +285,11 @@ def _method_to_chunk(
     line_no = node.position.line if node.position else 0
     javadoc = javadoc_map.get(line_no, "")
 
-    content_parts = [signature]
+    # content: import + 全限定调用 + 返回类型（消除幻觉）
+    content_parts = [
+        f"import {class_fqn};",
+        f"{class_fqn.split('.')[-1]}.{node.name}({params}) → {returns}",
+    ]
     if javadoc:
         content_parts.append("")
         content_parts.append(javadoc)
@@ -324,7 +327,6 @@ def _constructor_to_chunk(
     """class_path: 包内类路径，如 "sdk.PointsException" 或 "PointsException" """
     params = _format_params(node.parameters)
     class_simple = class_path.split(".")[-1]
-    signature = f"public {class_simple}({params})"
 
     fqn = f"{package_name}.{class_path}" if package_name else class_path
     chunk_id = _make_id(f"{sdk_id}:{fqn}:constructor")
@@ -332,7 +334,10 @@ def _constructor_to_chunk(
     line_no = node.position.line if node.position else 0
     javadoc = javadoc_map.get(line_no, "")
 
-    content_parts = [signature]
+    content_parts = [
+        f"import {fqn};",
+        f"new {class_simple}({params})",
+    ]
     if javadoc:
         content_parts.append("")
         content_parts.append(javadoc)

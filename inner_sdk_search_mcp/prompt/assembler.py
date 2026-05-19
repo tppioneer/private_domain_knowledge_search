@@ -93,15 +93,31 @@ def _format_knowledge_item(item: dict, index: int) -> str:
         source_badge = " [文档]"
 
     lines = [f"### [{label}]{source_badge} (score: {item.get('score', 0):.2f})"]
-    lines.append(content)
 
-    code_example = meta.get("code_example", "")
-    if code_example:
-        lines.append(f"\n示例代码:\n```\n{code_example}\n```")
+    # SDK 源码：显式标注 import 路径和返回类型，消除幻觉
+    if knowledge_source == "sdk_code":
+        class_name = meta.get("class_name", "")
+        return_type = meta.get("return_type", "")
+        version = meta.get("version", "")
+        if class_name:
+            lines.append(f"import: {class_name};")
+        if return_type:
+            lines.append(f"返回类型: {return_type}")
+        if version:
+            lines.append(f"SDK 版本: {version}")
+
+    # REST API 文档：标注 HTTP 方法和路径
+    http_method = meta.get("http_method", "")
+    url_path = meta.get("url_path", "")
+    if http_method and url_path:
+        lines.append(f"调用方式: {http_method} {url_path}")
+
+    lines.append("")
+    lines.append(content)
 
     related = meta.get("related_entity", "")
     if related:
-        lines.append(f"关联实体: {related}")
+        lines.append(f"\n关联实体: {related}")
 
     lines.append("")
     return "\n".join(lines)
