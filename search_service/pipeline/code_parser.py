@@ -220,41 +220,64 @@ def _detect_class_role(
     class_path: str,
     method_nodes: list[tuple],
 ) -> str:
-    """根据包路径层级 + 方法特征推断类在 SDK 中的角色。
+    """根据包路径层级 + 类名 + 方法特征推断类在 SDK 中的角色。
 
     Returns:
         "entry_point" | "public_api" | "internal"
     """
-    path_parts = class_path.lower().split(".")
+    # 从 package_name 提取叶子包（如 com.company.file.dao → dao）
+    pkg_parts = package_name.lower().split(".") if package_name else []
+    leaf_pkg = pkg_parts[-1] if pkg_parts else ""
 
-    # 子包检测
+    # 子包分类
     sub_pkg_internal = {"dao", "config", "impl", "internal", "model", "dto", "vo"}
     sub_pkg_public = {"service", "api", "client", "facade"}
 
-    has_sub_pkg = len(path_parts) > 1
-    leaf_pkg = path_parts[-2] if has_sub_pkg else ""
+    is_root_pkg = leaf_pkg == "" or leaf_pkg == pkg_parts[0] if pkg_parts else True
+    is_root = is_root_pkg or leaf_pkg not in (sub_pkg_internal | sub_pkg_public | {"util"})
+    simple_name = class_path.split(".")[-1].lower()
 
-    # 规则 1: 子包明确标记为内部
+    # 规则 1: 子包明确标记为内部（dao/config/impl/...）
     if leaf_pkg in sub_pkg_internal:
         return "internal"
 
-    # 规则 2: 全是 getter/setter → internal（如 config POJO）
+    # 规则 2: 全是 getter/setter → internal
     if method_nodes and _all_getters_setters(method_nodes):
         return "internal"
 
-    # 规则 3: 根包或 service/api 子包 + 含静态工厂方法 → entry_point
-    is_root = not has_sub_pkg
+    # 规则 3: 类名模式 → 偏向入口
+    entry_suffixes = ("factory", "manager", "client", "bootstrap",
+                       "starter", "builder")
+    is_entry_name = simple_name.endswith(entry_suffixes)
     has_static_factory = _has_static_factory(method_nodes)
+    has_self_return = _has_self_returning_methods(method_nodes, simple_name)
 
+    # 3a: Builder 模式（含 build() 且方法返回自身）
+    if has_self_return and _has_build_method(method_nodes):
+        return "entry_point"
+
+    # 3b: 根包 + 类名 Factory/Manager/Client/Bootstrap + 有公开非 getter 方法
+    if is_entry_name and is_root and method_nodes:
+        return "entry_point"
+
+    # 3c: 含静态工厂 + 在根包或 public 子包
     if has_static_factory and (is_root or leaf_pkg in sub_pkg_public):
         return "entry_point"
 
-    # 规则 4: 在 service/api 子包 → public_api
+    # 3d: 根包类名带入口后缀，即使无静态方法（可能是 Spring Bean 入口）
+    if is_entry_name and leaf_pkg in sub_pkg_public:
+        return "entry_point"
+
+    # 规则 4: 在 service/api/client/facade 子包 → public_api
     if leaf_pkg in sub_pkg_public:
         return "public_api"
 
-    # 规则 5: 根包无工厂方法 → public_api（如接口、抽象类）
+    # 规则 5: 根包 → public_api（接口、抽象类、枚举等）
     if is_root:
+        return "public_api"
+
+    # 规则 6: "util" 子包 → public_api（工具类属于公开能力）
+    if leaf_pkg == "util":
         return "public_api"
 
     # 兜底
@@ -283,6 +306,23 @@ def _has_static_factory(method_nodes: list[tuple]) -> bool:
             rt = node.return_type.name if node.return_type else "void"
             if rt not in primitive and not rt.startswith("java.lang."):
                 return True
+    return False
+
+
+def _has_self_returning_methods(method_nodes: list[tuple], class_simple_name: str) -> bool:
+    """判断类是否有方法返回自身类型（Builder 模式特征）。"""
+    for node, _ in method_nodes:
+        rt = node.return_type.name if node.return_type else ""
+        if rt == class_simple_name:
+            return True
+    return False
+
+
+def _has_build_method(method_nodes: list[tuple]) -> bool:
+    """判断类是否有 build() 方法（Builder 模式标志）。"""
+    for node, _ in method_nodes:
+        if node.name == "build":
+            return True
     return False
 
 
