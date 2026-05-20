@@ -1,7 +1,7 @@
 # MCP Server 代码审查问题报告
 
 **审查日期**：2026-05-10
-**审查范围**：requirement.md、mcp_design.md 及 mcp/ 目录下已实现代码
+**审查范围**：1.requirement.md、3.mcp_design.md 及 inner_sdk_search_inner_sdk_search_mcp/ 目录下已实现代码
 **审查依据**：需求文档功能定义 vs 实际代码实现
 
 ---
@@ -11,7 +11,7 @@
 ### S1: Prompt注入防护不完整
 
 **严重程度**：高
-**位置**：`mcp/prompt/sanitizer.py`
+**位置**：`inner_sdk_search_mcp/prompt/sanitizer.py`
 **问题描述**：仅检测4种越狱模式，缺少多种绕过方式：
 - Base64编码绕过
 - URL编码绕过
@@ -33,7 +33,7 @@
 ### S2: meta字段未清洗
 
 **严重程度**：高
-**位置**：`mcp/prompt/sanitizer.py`
+**位置**：`inner_sdk_search_mcp/prompt/sanitizer.py`
 **问题描述**：仅清洗 `content` 字段，`meta.code_example`、`meta.related_entity` 等未检测，可能成为注入通道
 
 **修复状态**：✅ 已修复
@@ -47,7 +47,7 @@
 ### S3: 越狱检测后未告警
 
 **严重程度**：中
-**位置**：`mcp/prompt/sanitizer.py`
+**位置**：`inner_sdk_search_mcp/prompt/sanitizer.py`
 **问题描述**：检测到越狱模式仅替换为"[已移除]"，未记录为安全事件、也未触发告警
 
 **修复状态**：✅ 已修复
@@ -70,12 +70,12 @@
 ### D1: 工具数量不匹配
 
 **严重程度**：低
-**位置**：`mcp/server.py` 及 `doc/mcp_design.md`
+**位置**：`inner_sdk_search_mcp/server.py` 及 `doc/3.mcp_design.md`
 **问题描述**：注释说6个工具，设计文档只列了5个（缺少assemble_prompt）
 
 **修复状态**：✅ 已修复
 
-**修复方案**：更新mcp_design.md文档
+**修复方案**：更新3.mcp_design.md文档
 - 工具总览表新增 `assemble_prompt` 工具
 - 新增第6章 `assemble_prompt` 详细设计
 - 版本历史记录为 v1.1
@@ -85,7 +85,7 @@
 ### D2: version_requirement未解析
 
 **严重程度**：中
-**位置**：`mcp/tools/get_entity.py`
+**位置**：`inner_sdk_search_mcp/tools/get_entity.py`
 **问题描述**：设计文档要求支持 `>=2.1.0` 这样的约束，实现只是透传给KB，未实际解析和版本匹配
 
 **修复建议**：
@@ -97,7 +97,7 @@
 ### D3: 返回类型不一致
 
 **严重程度**：中
-**位置**：`mcp/tools/get_entity.py`
+**位置**：`inner_sdk_search_mcp/tools/get_entity.py`
 **问题描述**：找不到实体时返回dict，但其他工具返回空响应/抛异常，行为不统一
 
 **修复状态**：✅ 已修复
@@ -125,7 +125,7 @@
 ### L1: Token估算不准确
 
 **严重程度**：中
-**位置**：`mcp/prompt/assembler.py`
+**位置**：`inner_sdk_search_mcp/prompt/assembler.py`
 **问题描述**：中文字符判断用Unicode范围 `"一" <= c <= "鿿"` 会漏掉中文标点（。、，、""）和部分生僻字
 
 **修复状态**：✅ 已修复
@@ -145,7 +145,7 @@ _CJK_PATTERN = re.compile(
 ### L2: 去重性能问题
 
 **严重程度**：中
-**位置**：`mcp/prompt/deduplicator.py`
+**位置**：`inner_sdk_search_mcp/prompt/deduplicator.py`
 **问题描述**：O(n²)复杂度，1000条知识片段会有性能问题
 
 **修复状态**：✅ 已修复
@@ -162,7 +162,7 @@ _CJK_PATTERN = re.compile(
 ### L3: 越狱模式检测过度匹配
 
 **严重程度**：低
-**位置**：`mcp/prompt/sanitizer.py`
+**位置**：`inner_sdk_search_mcp/prompt/sanitizer.py`
 **问题描述**：正则 `[\s\S]*` 可能过度匹配，导致整段被替换为"[已移除]"
 
 **修复状态**：✅ 随S1修复
@@ -174,7 +174,7 @@ _CJK_PATTERN = re.compile(
 ### L4: auto_assemble导入位置
 
 **严重程度**：低
-**位置**：`mcp/tools/search_knowledge.py`
+**位置**：`inner_sdk_search_mcp/tools/search_knowledge.py`
 **问题描述**：在async函数内import，虽然可行但不符合PEP8习惯
 
 **修复状态**：❌ 无需修复
@@ -188,7 +188,7 @@ _CJK_PATTERN = re.compile(
 ### B1: context为None时specs被跳过
 
 **严重程度**：低
-**位置**：`mcp/tools/search_knowledge.py`
+**位置**：`inner_sdk_search_mcp/tools/search_knowledge.py`
 **问题描述**：`if auto_assemble.include_specs and kb and context and context.module` - context为None时不会报错，但会静默跳过specs
 
 **修复状态**：✅ 已修复
@@ -204,7 +204,7 @@ _CJK_PATTERN = re.compile(
 ### B2: items为空时统计计算异常
 
 **严重程度**：低
-**位置**：`mcp/prompt/assembler.py`
+**位置**：`inner_sdk_search_mcp/prompt/assembler.py`
 **问题描述**：`stats.after_dedup - truncated` 可能为负数
 
 **修复状态**：✅ 已修复
@@ -216,7 +216,7 @@ _CJK_PATTERN = re.compile(
 ### B3: project_meta字段缺失
 
 **严重程度**：中
-**位置**：`mcp/models/schemas.py`
+**位置**：`inner_sdk_search_mcp/models/schemas.py`
 **问题描述**：`ProjectMeta`要求必填`project_id`和`team`，但IDE传入时可能缺失，应有默认值
 
 **修复状态**：✅ 已修复
@@ -245,7 +245,7 @@ _CJK_PATTERN = re.compile(
 | S1 | ✅ 已修复 | 2026-05-10 | 重写sanitizer.py，增强越狱模式检测 |
 | S2 | ✅ 已修复 | 2026-05-10 | sanitize_items新增meta全字段清洗 |
 | S3 | ✅ 已修复 | 2026-05-10 | 新增安全审计日志器，记录完整安全事件 |
-| D1 | ✅ 已修复 | 2026-05-10 | 更新mcp_design.md，新增assemble_prompt工具章节 |
+| D1 | ✅ 已修复 | 2026-05-10 | 更新3.mcp_design.md，新增assemble_prompt工具章节 |
 | D3 | ✅ 已修复 | 2026-05-10 | EntityDetailResponse新增found字段，统一返回类型 |
 | L1 | ✅ 已修复 | 2026-05-10 | 使用正则匹配完整CJK范围 |
 | L2 | ✅ 已修复 | 2026-05-10 | 优化去重算法，O(n²)降至O(n×top_n) |
