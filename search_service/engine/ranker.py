@@ -17,6 +17,13 @@ _TYPE_BOOST: dict[str, float] = {
     "spec": 0.95,
 }
 
+# SDK 角色权重（入口 > 公开 API > 内部实现）
+_ROLE_BOOST: dict[str, float] = {
+    "entry_point": 1.0,
+    "public_api": 0.92,
+    "internal": 0.80,
+}
+
 
 def rerank(items: list[KnowledgeItem], query: str) -> list[KnowledgeItem]:
     """对融合后的候选集重排序并归一化。
@@ -30,6 +37,11 @@ def rerank(items: list[KnowledgeItem], query: str) -> list[KnowledgeItem]:
     query_lower = query.lower()
     for item in items:
         boost = _TYPE_BOOST.get(item.type.value, 0.5)
+
+        # 角色加成（SDK 入口 > 公开 API > 内部实现）
+        role = item.meta.role if item.meta and item.meta.role else ""
+        role_boost = _ROLE_BOOST.get(role, 0.90)
+        boost *= role_boost
 
         # 关键词命中加成
         content_lower = item.content.lower()

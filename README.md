@@ -29,11 +29,11 @@ private_domain_knowledge_search/
 ├── README.md
 ├── CLAUDE.md
 ├── doc/
-│   ├── requirement.md             # 私域知识赋能 AI Coding 总体技术方案
-│   ├── mcp_design.md              # MCP Server 6 个工具接口详细设计
-│   ├── search_service_design.md   # Search Service 微服务详细设计
-│   ├── pipeline_design.md          # 数据预处理管道详细设计
-│   └── deployment_guide.md         # 部署与接入指南（OpenCode 等 IDE）
+│   ├── 1.requirement.md            # 私域知识赋能 AI Coding 总体技术方案
+│   ├── 2.search_service_design.md  # Search Service 微服务详细设计
+│   ├── 3.mcp_design.md             # MCP Server 6 个工具接口详细设计
+│   ├── 4.deployment_guide.md       # 部署与接入指南（OpenCode 等 IDE）
+│   └── 5.pipeline_design.md        # 数据预处理管道详细设计
 ├── inner_sdk_search_mcp/          # MCP Server（每 IDE 一个进程）
 │   ├── server.py                  # 主入口，注册 6 个 MCP 工具
 │   ├── config.py                  # 配置（搜索超时、Prompt 参数、Search Service URL）
@@ -231,4 +231,4 @@ MCP Server 通过 stdio 与 IDE 通信。不设置 `SEARCH_SERVICE_URL` 时自�
 3. **运营闭环**：反馈权重调整 + 知识质量评估 + 增量更新管道
 4. **推广扩展**：多业务域覆盖 + 代码检视场景 + 权限隔离
 
-详见 `doc/requirement.md`。
+详见 `doc/1.requirement.md`。

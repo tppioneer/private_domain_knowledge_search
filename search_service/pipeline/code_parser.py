@@ -176,30 +176,114 @@ def parse_java_file(filepath: str, sdk_meta: dict) -> list[dict]:
     javadoc_map = _extract_javadocs(source)
     sdk_id = sdk_meta.get("artifact_id", "unknown")
     version = sdk_meta.get("version", "")
-    # 追踪类层级以构造完整限定名（处理嵌套类）
     class_stack: list[str] = [os.path.splitext(os.path.basename(filepath))[0]]
 
+    # 第一遍：收集方法节点信息，用于角色推断
+    method_nodes: list[tuple] = []
+    constructor_nodes: list[tuple] = []
     for path, node in tree:
         if isinstance(node, javalang.tree.ClassDeclaration):
             class_stack.append(node.name)
         elif isinstance(node, javalang.tree.MethodDeclaration):
             if "public" not in node.modifiers:
                 continue
-            fqn = ".".join(class_stack[1:] + [node.name])  # 跳过默认值
-            chunk = _method_to_chunk(
-                node, package_name, fqn, sdk_id, version, filepath, javadoc_map,
-            )
-            chunks.append(chunk)
+            fqn = ".".join(class_stack[1:] + [node.name])
+            method_nodes.append((node, fqn))
         elif isinstance(node, javalang.tree.ConstructorDeclaration):
             if "public" not in node.modifiers:
                 continue
-            fqn = ".".join(class_stack[1:])  # 构造函数的 FQN = 类的完整限定名
-            chunk = _constructor_to_chunk(
-                node, package_name, fqn, sdk_id, version, filepath, javadoc_map,
-            )
-            chunks.append(chunk)
+            fqn = ".".join(class_stack[1:])
+            constructor_nodes.append((node, fqn))
+
+    # 推断类的角色
+    class_path = ".".join(class_stack[1:])
+    role = _detect_class_role(package_name, class_path, method_nodes)
+
+    # 第二遍：生成 chunk
+    for node, fqn in method_nodes:
+        chunk = _method_to_chunk(
+            node, package_name, fqn, sdk_id, version, filepath, javadoc_map, role,
+        )
+        chunks.append(chunk)
+
+    for node, fqn in constructor_nodes:
+        chunk = _constructor_to_chunk(
+            node, package_name, fqn, sdk_id, version, filepath, javadoc_map, role,
+        )
+        chunks.append(chunk)
 
     return chunks
+
+
+def _detect_class_role(
+    package_name: str,
+    class_path: str,
+    method_nodes: list[tuple],
+) -> str:
+    """根据包路径层级 + 方法特征推断类在 SDK 中的角色。
+
+    Returns:
+        "entry_point" | "public_api" | "internal"
+    """
+    path_parts = class_path.lower().split(".")
+
+    # 子包检测
+    sub_pkg_internal = {"dao", "config", "impl", "internal", "model", "dto", "vo"}
+    sub_pkg_public = {"service", "api", "client", "facade"}
+
+    has_sub_pkg = len(path_parts) > 1
+    leaf_pkg = path_parts[-2] if has_sub_pkg else ""
+
+    # 规则 1: 子包明确标记为内部
+    if leaf_pkg in sub_pkg_internal:
+        return "internal"
+
+    # 规则 2: 全是 getter/setter → internal（如 config POJO）
+    if method_nodes and _all_getters_setters(method_nodes):
+        return "internal"
+
+    # 规则 3: 根包或 service/api 子包 + 含静态工厂方法 → entry_point
+    is_root = not has_sub_pkg
+    has_static_factory = _has_static_factory(method_nodes)
+
+    if has_static_factory and (is_root or leaf_pkg in sub_pkg_public):
+        return "entry_point"
+
+    # 规则 4: 在 service/api 子包 → public_api
+    if leaf_pkg in sub_pkg_public:
+        return "public_api"
+
+    # 规则 5: 根包无工厂方法 → public_api（如接口、抽象类）
+    if is_root:
+        return "public_api"
+
+    # 兜底
+    return "internal"
+
+
+def _all_getters_setters(method_nodes: list[tuple]) -> bool:
+    """判断所有方法是否都是 getter/setter（isXxx / getXxx / setXxx）。"""
+    if not method_nodes:
+        return False
+    import javalang
+    for node, _ in method_nodes:
+        name = node.name
+        if not (name.startswith("get") or name.startswith("set")
+                or name.startswith("is") or name == "toString"
+                or name == "hashCode" or name == "equals"):
+            return False
+    return True
+
+
+def _has_static_factory(method_nodes: list[tuple]) -> bool:
+    """判断类是否包含静态工厂方法——static + 返回类型非 void/非基本类型。"""
+    primitive = {"void", "int", "long", "float", "double", "boolean", "byte", "short", "char"}
+    for node, _ in method_nodes:
+        if "static" in node.modifiers:
+            rt = node.return_type.name if node.return_type else "void"
+            if rt not in primitive and not rt.startswith("java.lang."):
+                return True
+    return False
 
 
 def _extract_javadocs(source: str) -> dict[int, str]:
@@ -270,6 +354,7 @@ def _extract_package(tree) -> str:
 def _method_to_chunk(
     node, package_name: str, full_method_name: str,
     sdk_id: str, version: str, filepath: str, javadoc_map: dict[int, str],
+    role: str = "public_api",
 ) -> dict:
     params = _format_params(node.parameters)
     returns = node.return_type.name if node.return_type else "void"
@@ -305,6 +390,7 @@ def _method_to_chunk(
         "method": node.name,
         "return_type": returns,
         "calls": calls,
+        "role": role,
     }
     import json
     meta_json = json.dumps(meta, ensure_ascii=False)
@@ -323,6 +409,7 @@ def _method_to_chunk(
 def _constructor_to_chunk(
     node, package_name: str, class_path: str,
     sdk_id: str, version: str, filepath: str, javadoc_map: dict[int, str],
+    role: str = "public_api",
 ) -> dict:
     """class_path: 包内类路径，如 "sdk.PointsException" 或 "PointsException" """
     params = _format_params(node.parameters)
@@ -349,6 +436,7 @@ def _constructor_to_chunk(
         "class_name": fqn,
         "method": class_simple,
         "return_type": class_simple,
+        "role": role,
     }
     import json
     meta_json = json.dumps(meta, ensure_ascii=False)

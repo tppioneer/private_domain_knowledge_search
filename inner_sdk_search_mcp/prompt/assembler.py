@@ -66,6 +66,32 @@ def _group_key(item_type: str) -> int:
     return _TYPE_ORDER.get(item_type, 999)
 
 
+def _collect_entry_points(sdk_items: list[dict]) -> list[str]:
+    """从 SDK 条目中收集 role=entry_point 的类名（去重）。"""
+    entry_names: list[str] = []
+    seen: set[str] = set()
+    for item in sdk_items:
+        meta = item.get("meta", {})
+        if meta.get("role") == "entry_point":
+            name = meta.get("class_name", "")
+            if name and name not in seen:
+                seen.add(name)
+                entry_names.append(name)
+    return entry_names
+
+
+def _build_entry_hint(entry_names: list[str]) -> str:
+    """根据入口类列表构造使用提示。无入口类时返回空字符串。"""
+    if not entry_names:
+        return ""
+    names_str = "、".join(entry_names)
+    return (
+        f"**SDK 使用提示：** 此 SDK 通过 `{names_str}` 提供统一入口，"
+        f"请使用其工厂/静态方法获取服务实例，标记为 `[internal]` 的 DAO/Config 类不应直接实例化。\n"
+        f"如需组合多个方法调用，优先查看 entry_point 类是否已提供现成方法。"
+    )
+
+
 def _format_knowledge_item(item: dict, index: int) -> str:
     """格式化单条知识片段为文本。"""
     item_type = item.get("type", "unknown")
@@ -96,6 +122,11 @@ def _format_knowledge_item(item: dict, index: int) -> str:
 
     # SDK 源码：显式标注 import 路径和返回类型，消除幻觉
     if knowledge_source == "sdk_code":
+        role = meta.get("role", "")
+        role_label = {"entry_point": " [统一入口]", "public_api": " [公开API]", "internal": " [内部实现]"}.get(role, "")
+        if role_label:
+            lines.append(f"SDK 角色: {role_label}")
+
         class_name = meta.get("class_name", "")
         return_type = meta.get("return_type", "")
         version = meta.get("version", "")
@@ -202,6 +233,13 @@ def assemble_sections(
 
     # SDK 源码优先（更可靠、更紧凑）
     if sdk_items:
+        # 检测是否有统一入口类
+        entry_points = _collect_entry_points(sdk_items)
+        if entry_points:
+            hint = _build_entry_hint(entry_points)
+            background_parts.append(hint + "\n")
+            current_tokens += _estimate_tokens(hint)
+
         background_parts.append("### 方法签名（SDK 源码）\n")
         current_tokens += _estimate_tokens(background_parts[-1])
         for i, item in enumerate(sdk_items):

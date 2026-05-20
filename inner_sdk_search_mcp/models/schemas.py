@@ -64,6 +64,8 @@ class KnowledgeMeta(BaseModel):
     source: Optional[str] = None
     applicable_version: Optional[str] = None
     related_ticket: Optional[str] = None
+    knowledge_source: Optional[str] = None
+    role: Optional[str] = None
 
 
 class KnowledgeItem(BaseModel):
