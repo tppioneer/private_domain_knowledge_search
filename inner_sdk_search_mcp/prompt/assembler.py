@@ -92,6 +92,55 @@ def _build_entry_hint(entry_names: list[str]) -> str:
     )
 
 
+def _group_by_return_chain(sdk_items: list[dict]) -> list[dict]:
+    """按返回值类型链分组：entry_point 方法绑定其返回值接口的方法。
+
+    例如: FileServiceManager.getSystemService() → FileService
+           └── uploadFile / downloadFile / listDirectory / deleteFile
+
+    Returns:
+        [{"parent": {...}, "children": [...]}, ...]
+    无匹配返回类型的方法单独成组（children 为空）。
+    """
+    # 建立 class_name → 方法列表的索引（按 simple name 匹配）
+    simple_index: dict[str, list[dict]] = {}
+    for item in sdk_items:
+        meta = item.get("meta", {})
+        fqn = meta.get("class_name", "")
+        if not fqn:
+            continue
+        simple = fqn.rsplit(".", 1)[-1]  # com.company.file.service.FileService → FileService
+        simple_index.setdefault(simple.lower(), []).append(item)
+
+    grouped: list[dict] = []
+    used_ids: set[str] = set()
+
+    for item in sdk_items:
+        iid = item.get("id", "")
+        if iid in used_ids:
+            continue
+        meta = item.get("meta", {})
+        return_type = meta.get("return_type", "")
+        role = meta.get("role", "")
+
+        # 只有 entry_point 或返回非基本类型的方法才尝试绑定子方法
+        children: list[dict] = []
+        if return_type and return_type.lower() in simple_index:
+            candidates = simple_index[return_type.lower()]
+            for c in candidates:
+                cid = c.get("id", "")
+                if cid != iid and cid not in used_ids:
+                    # 标注反向引用：公开 API → 入口方法
+                    c.setdefault("meta", {})["_parent_entry"] = item
+                    children.append(c)
+                    used_ids.add(cid)
+
+        used_ids.add(iid)
+        grouped.append({"parent": item, "children": children})
+
+    return grouped
+
+
 def _format_knowledge_item(item: dict, index: int) -> str:
     """格式化单条知识片段为文本。"""
     item_type = item.get("type", "unknown")
@@ -136,6 +185,15 @@ def _format_knowledge_item(item: dict, index: int) -> str:
             lines.append(f"返回类型: {return_type}")
         if version:
             lines.append(f"SDK 版本: {version}")
+
+        # 反向提示：公开 API → 哪个入口能构造它
+        parent_entry = meta.get("_parent_entry")
+        if parent_entry:
+            p_meta = parent_entry.get("meta", {})
+            p_name = p_meta.get("class_name", "").rsplit(".", 1)[-1]
+            p_method = p_meta.get("method", "")
+            if p_name and p_method:
+                lines.append(f"获取此实例: {p_name}.{p_method}(...)")
 
     # REST API 文档：标注 HTTP 方法和路径
     http_method = meta.get("http_method", "")
@@ -242,15 +300,42 @@ def assemble_sections(
 
         background_parts.append("### 方法签名（SDK 源码）\n")
         current_tokens += _estimate_tokens(background_parts[-1])
-        for i, item in enumerate(sdk_items):
-            formatted = _format_knowledge_item(item, i + 1)
+
+        # 按返回值类型链分组（entry_point 方法 + 其返回值接口的方法）
+        groups = _group_by_return_chain(sdk_items)
+        i = 0
+        for group in groups:
+            parent = group["parent"]
+            children = group["children"]
+
+            # 父方法（入口）
+            formatted = _format_knowledge_item(parent, i + 1)
             item_tokens = _estimate_tokens(formatted)
             if current_tokens + item_tokens > remaining * 0.8:
-                truncated += len(sdk_items) - i
+                truncated = len(sdk_items) - i
                 background_parts.append(f"\n[以下 {truncated} 条知识因 token 预算限制省略]\n")
                 break
             background_parts.append(formatted)
             current_tokens += item_tokens
+            i += 1
+
+            # 子方法（返回值接口提供的能力），缩进展示
+            if children:
+                prefix = "    返回值接口可用方法:"
+                background_parts.append(prefix + "\n")
+                current_tokens += _estimate_tokens(prefix)
+                for child in children:
+                    child_formatted = "    " + _format_knowledge_item(child, 0).replace("\n", "\n    ")
+                    child_tokens = _estimate_tokens(child_formatted)
+                    if current_tokens + child_tokens > remaining * 0.8:
+                        truncated = len(sdk_items) - i
+                        background_parts.append(f"\n[以下 {truncated} 条知识因 token 预算限制省略]\n")
+                        break
+                    background_parts.append(child_formatted)
+                    current_tokens += child_tokens
+                    i += 1
+                if truncated:
+                    break
 
     # 文档内容补充（背景、用法、FAQ）
     if doc_items and truncated == 0:
