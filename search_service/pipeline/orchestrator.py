@@ -105,6 +105,8 @@ def run(
         for i in range(len(chunk_ids) - 1):
             graph.add_relation(chunk_ids[i], chunk_ids[i + 1], "RELATED_TO")
 
+    # 批量加载完成后一次性持久化
+    graph.flush()
     logger.info("graph nodes: %d", len(all_chunks))
 
     return {

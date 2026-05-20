@@ -20,8 +20,12 @@ class LiteVectorSearcher:
         self._index = None
         self._id_map: dict[int, dict] = {}
         self._next_id = 0
-        self._dim = 768
         self._loaded = False
+
+    @property
+    def _dim(self) -> int:
+        from .embedding import get_embedding_model
+        return get_embedding_model().dim
 
     @property
     def available(self) -> bool:
@@ -56,12 +60,21 @@ class LiteVectorSearcher:
             json.dump(self._id_map, f, ensure_ascii=False)
 
     def index_vectors(self, ids: list[str], vectors: list[list[float]], metas: list[dict]) -> int:
-        """批量索引向量。返回索引数量。"""
+        """批量索引向量。返回索引数量。维度不匹配时自动重建索引。"""
         self._load()
         import faiss
         import numpy as np
 
         vec_array = np.array(vectors, dtype=np.float32)
+        vec_dim = vec_array.shape[1]
+
+        # 维度不匹配 → 旧索引残留，自动重建
+        if self._index.ntotal > 0 and vec_dim != self._index.d:
+            logger.info("index dimension mismatch (old=%d new=%d), recreating index", self._index.d, vec_dim)
+            self._index = faiss.IndexFlatIP(vec_dim)
+            self._id_map = {}
+            self._next_id = 0
+
         for doc_id, meta in zip(ids, metas):
             self._id_map[self._next_id] = {"doc_id": doc_id, **meta}
             self._next_id += 1

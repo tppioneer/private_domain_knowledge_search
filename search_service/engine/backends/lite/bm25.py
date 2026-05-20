@@ -66,8 +66,10 @@ class LiteBM25Searcher:
     ) -> list[KnowledgeItem]:
         conn = sqlite3.connect(self.db_path)
 
+        # FTS5 多词默认 AND，改为 OR 提升召回
+        fts_query = " OR ".join(query.split())
         conditions = ["knowledge_fts MATCH ?"]
-        params: list = [query]
+        params: list = [fts_query]
 
         if knowledge_types:
             placeholders = ",".join(["?"] * len(knowledge_types))
@@ -91,6 +93,7 @@ class LiteBM25Searcher:
         try:
             rows = conn.execute(sql, params).fetchall()
             items: list[KnowledgeItem] = []
+            raw_scores: list[float] = []
             for row in rows:
                 doc_id, item_type, content, meta_json, raw_score = row
                 meta = {}
@@ -100,20 +103,27 @@ class LiteBM25Searcher:
                         meta = json.loads(meta_json)
                     except Exception:
                         pass
-                # sigmoid 归一化：保留分数区分度（-∞→0, 0→0.5, +∞→1.0）
-                import math
-                normalized = 1.0 / (1.0 + math.exp(-raw_score))
                 try:
                     kt = KnowledgeType(item_type)
                 except ValueError:
-                    kt = KnowledgeType.API  # 未知类型降级为 api
+                    kt = KnowledgeType.API
                 items.append(KnowledgeItem(
                     id=doc_id,
                     type=kt,
                     content=content,
-                    score=round(normalized, 4),
+                    score=0.0,  # 占位，下面统一归一化
                     meta=KnowledgeMeta(**meta),
                 ))
+                raw_scores.append(raw_score)
+
+            # 结果集内相对归一化：最高分→1.0，最低分→0.1，线性映射
+            if raw_scores:
+                max_s = max(raw_scores)
+                min_s = min(raw_scores)
+                span = max_s - min_s if max_s != min_s else 1.0
+                for i, item in enumerate(items):
+                    item.score = round(0.1 + 0.9 * (raw_scores[i] - min_s) / span, 4)
+
             return items
         except Exception:
             logger.exception("bm25 search failed: query=%s", query[:100])

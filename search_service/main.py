@@ -16,6 +16,13 @@ from .api.router import router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 启动时预加载 embedding 模型，避免首次请求阻塞
+    from .engine.backends.lite.embedding import get_embedding_model
+    emb = get_embedding_model()
+    if emb.available:
+        print(f"[preload] embedding model ready: dim={emb.dim}")
+    else:
+        print("[preload] embedding model unavailable, using zero-vector placeholder")
     yield
 
 

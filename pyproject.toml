@@ -13,8 +13,18 @@ dependencies = [
     "httpx>=0.27.0",
 ]
 
+[project.optional-dependencies]
+# 轻量模式（本地运行 Search Service，免外部 ES/Milvus/Neo4j）
+lite = [
+    "faiss-cpu>=1.7.0",
+    "networkx>=3.0",
+    "numpy>=1.24.0",
+    "javalang>=0.13.0",
+    "sentence-transformers>=2.2.0",
+]
+
 [project.scripts]
 inner-sdk-search-mcp = "inner_sdk_search_mcp.server:main"
 
 [tool.setuptools.packages.find]
-include = ["inner_sdk_search_mcp*"]
+include = ["inner_sdk_search_mcp*", "search_service*"]

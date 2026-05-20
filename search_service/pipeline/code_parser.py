@@ -495,9 +495,15 @@ def parse_java_repo(repo_dir: str) -> list[dict]:
     for mod in modules:
         pom_dir = mod.get("pom_dir", repo_dir)
         java_files = list(Path(pom_dir).rglob("*.java"))
-        logger.info("module %s: %d java files", mod.get("artifact_id"), len(java_files))
+        # 过滤 test 目录（src/test/java）
+        src_files = [jf for jf in java_files if "/test/" not in str(jf).replace("\\", "/")]
+        skipped = len(java_files) - len(src_files)
+        if skipped:
+            logger.info("module %s: %d java files (%d test skipped)", mod.get("artifact_id"), len(java_files), skipped)
+        else:
+            logger.info("module %s: %d java files", mod.get("artifact_id"), len(java_files))
 
-        for jf in java_files:
+        for jf in src_files:
             chunks = parse_java_file(str(jf), mod)
             all_chunks.extend(chunks)
 

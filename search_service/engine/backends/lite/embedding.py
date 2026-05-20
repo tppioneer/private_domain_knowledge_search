@@ -24,7 +24,7 @@ class EmbeddingModel:
                 from sentence_transformers import SentenceTransformer
                 self._model = SentenceTransformer(self.model_name)
                 self._available = True
-                logger.info("embedding model loaded: %s", self.model_name)
+                logger.info("embedding model loaded: %s (dim=%d)", self.model_name, self.dim)
             except Exception:
                 logger.warning("embedding model unavailable, using zero-vector placeholder")
                 self._available = False
@@ -32,6 +32,8 @@ class EmbeddingModel:
 
     @property
     def dim(self) -> int:
+        if self._model is not None:
+            return self._model.get_sentence_embedding_dimension() or _DIM  # noqa — compat with older versions
         return _DIM
 
     def embed(self, texts: list[str]) -> list[list[float]]:

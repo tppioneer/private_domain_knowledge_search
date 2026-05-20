@@ -47,6 +47,9 @@ class LiteGraphSearcher:
         with open(self.storage_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
+    def _ensure_loaded(self):
+        self._load()
+
     def add_entity(self, doc_id: str, item_type: str, content: str, meta: dict | None = None):
         self._load()
         self._graph.add_node(
@@ -55,11 +58,14 @@ class LiteGraphSearcher:
             content=content,
             meta=meta or {},
         )
-        self._save()
 
     def add_relation(self, source: str, target: str, relation_type: str = "RELATED_TO"):
         self._load()
         self._graph.add_edge(source, target, relation=relation_type)
+
+    def flush(self):
+        """手动持久化到磁盘（批量加载后调用一次即可）。"""
+        self._load()
         self._save()
 
     async def search(
