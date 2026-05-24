@@ -287,6 +287,12 @@ async def main():
     await server.run()
 
 
-if __name__ == "__main__":
+def run():
+    """同步入口点，供 setuptools console_scripts 调用。"""
     import asyncio
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()
+

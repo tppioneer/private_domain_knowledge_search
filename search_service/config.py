@@ -32,6 +32,10 @@ class ServiceConfig:
     neo4j_user: str = os.getenv("NEO4J_USER", "neo4j")
     neo4j_password: str = os.getenv("NEO4J_PASSWORD", "")
 
+    # Embedding 模型
+    embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-small-zh")
+    embedding_model_path: str = os.getenv("EMBEDDING_MODEL_PATH", "")  # 本地路径，离线环境使用
+
     # 检索参数
     candidate_multiplier: int = int(os.getenv("CANDIDATE_MULTIPLIER", "3"))  # 每路检索取 top_k * N 候选
     search_timeout_ms: int = int(os.getenv("SEARCH_TIMEOUT_MS", "300"))

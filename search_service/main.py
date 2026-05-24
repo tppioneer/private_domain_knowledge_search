@@ -17,12 +17,17 @@ from .api.router import router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动时预加载 embedding 模型，避免首次请求阻塞
-    from .engine.backends.lite.embedding import get_embedding_model
-    emb = get_embedding_model()
-    if emb.available:
-        print(f"[preload] embedding model ready: dim={emb.dim}")
-    else:
-        print("[preload] embedding model unavailable, using zero-vector placeholder")
+    # 离线环境：设置 EMBEDDING_MODEL_PATH=/path/to/bge-small-zh 指向本地模型
+    #            模型不可用时自动降级为零向量，不阻塞启动
+    try:
+        from .engine.backends.lite.embedding import get_embedding_model
+        emb = get_embedding_model()
+        if emb.available:
+            print(f"[preload] embedding model ready: dim={emb.dim}")
+        else:
+            print("[preload] embedding model unavailable, using zero-vector placeholder")
+    except Exception as e:
+        print(f"[preload] embedding model load failed ({e}), using zero-vector placeholder")
     yield
 
 
