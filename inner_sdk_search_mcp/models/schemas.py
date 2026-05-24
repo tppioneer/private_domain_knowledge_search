@@ -79,6 +79,7 @@ class KnowledgeItem(BaseModel):
 class Diagnostics(BaseModel):
     total_scanned: int = 0
     time_ms: int = 0
+    backend_ms: dict[str, float] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
 
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 
 from .config import server_config
+from .metrics import MetricsContext
 from .models.schemas import (
     AssemblePromptInput,
     AutoAssembleConfig,
@@ -81,16 +82,30 @@ class PrivateKnowledgeMCPServer:
             ctx = Context(**context) if context else None
             types = [KnowledgeType(t) for t in knowledge_types] if knowledge_types else None
             aa_config = AutoAssembleConfig(**auto_assemble) if auto_assemble else None
-            result = await search_private_knowledge(
-                engine=engine,
-                query=query,
-                context=ctx,
-                knowledge_types=types,
-                top_k=top_k,
-                min_score=min_score,
-                auto_assemble=aa_config,
-                kb=kb,
-            )
+            session_id = (context or {}).get("session_id", "")
+            with MetricsContext(
+                "search_private_knowledge", session_id=session_id,
+                log_dir=server_config.metrics_log_dir,
+                enabled=server_config.metrics_enabled,
+            ) as mc:
+                mc.set_input(
+                    query_len=len(query), top_k=top_k, min_score=min_score,
+                    knowledge_types=knowledge_types, auto_assemble=bool(auto_assemble),
+                )
+                with mc.span("remote_search") as span:
+                    result = await search_private_knowledge(
+                        engine=engine, query=query, context=ctx,
+                        knowledge_types=types, top_k=top_k, min_score=min_score,
+                        auto_assemble=aa_config, kb=kb,
+                    )
+                    span.meta["item_count"] = len(result.items)
+                    span.meta["backend_ms"] = result.diagnostics.backend_ms
+                mc.set_output(
+                    result_count=len(result.items),
+                    has_assembled=result.assembled_prompt is not None,
+                )
+                if result.assembled_prompt:
+                    mc.set_output(assembled_tokens=result.assembled_prompt.estimated_tokens)
             return result.model_dump()
 
         @s.tool(
@@ -104,12 +119,19 @@ class PrivateKnowledgeMCPServer:
             version_requirement: str | None = None,
         ) -> dict:
             etype = EntityType(entity_type) if entity_type else None
-            result = await get_entity_detail(
-                kb=kb,
-                entity_name=entity_name,
-                entity_type=etype,
-                version_requirement=version_requirement,
-            )
+            with MetricsContext(
+                "get_entity_detail", session_id="",
+                log_dir=server_config.metrics_log_dir,
+                enabled=server_config.metrics_enabled,
+            ) as mc:
+                mc.set_input(entity_name=entity_name, entity_type=entity_type)
+                with mc.span("get_entity") as span:
+                    result = await get_entity_detail(
+                        kb=kb, entity_name=entity_name, entity_type=etype,
+                        version_requirement=version_requirement,
+                    )
+                    span.meta["found"] = result.entity_name != "" if result.entity_name else False
+                mc.set_output(found=bool(result.entity_name))
             return result.model_dump()
 
         @s.tool(
@@ -121,12 +143,19 @@ class PrivateKnowledgeMCPServer:
             file_path: str | None = None,
             dependency_constraints: dict | None = None,
         ) -> dict:
-            result = await get_applicable_spec(
-                kb=kb,
-                module=module,
-                file_path=file_path,
-                dependency_constraints=dependency_constraints,
-            )
+            with MetricsContext(
+                "get_applicable_spec", session_id="",
+                log_dir=server_config.metrics_log_dir,
+                enabled=server_config.metrics_enabled,
+            ) as mc:
+                mc.set_input(module=module, file_path=file_path)
+                with mc.span("get_specs") as span:
+                    result = await get_applicable_spec(
+                        kb=kb, module=module, file_path=file_path,
+                        dependency_constraints=dependency_constraints,
+                    )
+                    span.meta["spec_count"] = len(result.specs)
+                mc.set_output(spec_count=len(result.specs))
             return result.model_dump()
 
         @s.tool(
@@ -138,10 +167,21 @@ class PrivateKnowledgeMCPServer:
             project_meta: dict,
         ) -> dict:
             meta = ProjectMeta(**project_meta)
-            result = await recommend_context(
-                kb=kb,
-                project_meta=meta,
-            )
+            with MetricsContext(
+                "recommend_context", session_id="",
+                log_dir=server_config.metrics_log_dir,
+                enabled=server_config.metrics_enabled,
+            ) as mc:
+                mc.set_input(project_id=meta.project_id, team=meta.team)
+                with mc.span("get_recommend") as span:
+                    result = await recommend_context(kb=kb, project_meta=meta)
+                    pinned = result.pinned_knowledge
+                    span.meta["has_architecture"] = bool(pinned.architecture_overview)
+                    span.meta["api_count"] = len(pinned.common_apis)
+                mc.set_output(
+                    has_architecture=bool(pinned.architecture_overview),
+                    api_count=len(pinned.common_apis),
+                )
             return result.model_dump()
 
         @s.tool(
@@ -154,12 +194,20 @@ class PrivateKnowledgeMCPServer:
             action: str,
             modification_detail: dict | None = None,
         ) -> dict:
-            result = await report_feedback(
-                kb=kb,
-                session_id=session_id,
-                consumed_knowledge_ids=consumed_knowledge_ids,
-                action=FeedbackAction(action),
-            )
+            with MetricsContext(
+                "report_feedback", session_id=session_id,
+                log_dir=server_config.metrics_log_dir,
+                enabled=server_config.metrics_enabled,
+            ) as mc:
+                mc.set_input(action=action, consumed_count=len(consumed_knowledge_ids))
+                with mc.span("submit_feedback") as span:
+                    result = await report_feedback(
+                        kb=kb, session_id=session_id,
+                        consumed_knowledge_ids=consumed_knowledge_ids,
+                        action=FeedbackAction(action),
+                    )
+                    span.meta["feedback_id"] = result.feedback_id
+                mc.set_output(feedback_id=result.feedback_id, status=result.status)
             return result.model_dump()
 
         @s.tool(
@@ -184,7 +232,24 @@ class PrivateKnowledgeMCPServer:
                 max_tokens=max_tokens,
                 role_hint=role_hint,
             )
-            result = await assemble_prompt_tool(input_)
+            session_id = (context or {}).get("session_id", "")
+            with MetricsContext(
+                "assemble_prompt", session_id=session_id,
+                log_dir=server_config.metrics_log_dir,
+                enabled=server_config.metrics_enabled,
+            ) as mc:
+                mc.set_input(
+                    query_len=len(user_query), max_tokens=max_tokens,
+                    item_count=len(search_items or []), spec_count=len(specs or []),
+                )
+                with mc.span("assemble") as span:
+                    result = await assemble_prompt_tool(input_)
+                    span.meta["estimated_tokens"] = result.estimated_tokens
+                    span.meta["truncated"] = result.truncated_items > 0
+                mc.set_output(
+                    estimated_tokens=result.estimated_tokens,
+                    truncated=result.truncated_items > 0,
+                )
             return result.model_dump()
 
     async def run(self):

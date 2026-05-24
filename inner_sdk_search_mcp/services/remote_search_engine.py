@@ -88,6 +88,7 @@ class RemoteSearchEngine(SearchEngine):
         diagnostics = Diagnostics(
             total_scanned=diag.get("total_scanned", 0),
             time_ms=diag.get("time_ms", 0),
+            backend_ms=diag.get("backend_ms", {}),
             warnings=diag.get("warnings", []),
         )
         return items, diagnostics

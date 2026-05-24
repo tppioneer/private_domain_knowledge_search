@@ -16,6 +16,10 @@ class ServerConfig:
     # 若未设置则回退到 Mock 实现；设置了则创建 Remote* 实现
     search_service_url: str = os.getenv("SEARCH_SERVICE_URL", "")
 
+    # ── 埋点配置 ──
+    metrics_enabled: bool = os.getenv("METRICS_ENABLED", "true").lower() not in ("false", "0", "no")
+    metrics_log_dir: str = os.getenv("METRICS_LOG_DIR", "./logs/metrics")
+
     # ── Prompt 组装配置 ──
     prompt_default_max_tokens: int = int(os.getenv("PROMPT_DEFAULT_MAX_TOKENS", "4096"))
     prompt_dedup_similarity_threshold: float = float(os.getenv("PROMPT_DEDUP_THRESHOLD", "0.92"))

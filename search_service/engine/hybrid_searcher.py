@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from ..config import service_config
 from ..models.schemas import Diagnostics, KnowledgeItem, KnowledgeType, SearchContext
@@ -43,9 +44,12 @@ class HybridSearcher:
             self.graph, "graph", query, context, knowledge_types, candidate_k, warnings,
         )
 
-        bm25_results, vector_results, graph_results = await asyncio.gather(
+        bm25_result, vector_result, graph_result = await asyncio.gather(
             bm25_task, vector_task, graph_task,
         )
+        bm25_results, bm25_ms = bm25_result
+        vector_results, vector_ms = vector_result
+        graph_results, graph_ms = graph_result
 
         # ── 三路融合 + 去重 ──
         merged: dict[str, KnowledgeItem] = {}
@@ -71,6 +75,7 @@ class HybridSearcher:
         diagnostics = Diagnostics(
             total_scanned=total_scanned,
             time_ms=0,  # 调用方填充
+            backend_ms={"bm25": bm25_ms, "vector": vector_ms, "graph": graph_ms},
             warnings=warnings,
         )
         return filtered, diagnostics
@@ -84,17 +89,21 @@ async def _safe_search(
     knowledge_types: list[KnowledgeType] | None,
     top_k: int,
     warnings: list[str],
-) -> list[KnowledgeItem]:
-    """安全调用单个检索器，失败时返回空并记录警告。"""
+) -> tuple[list[KnowledgeItem], float]:
+    """安全调用单个检索器，返回 (results, elapsed_ms)。"""
+    t0 = time.perf_counter()
     try:
         results = await asyncio.wait_for(
             searcher.search(query, context, knowledge_types, top_k),
             timeout=service_config.search_timeout_ms / 1000,
         )
-        return results or []
+        elapsed = round((time.perf_counter() - t0) * 1000, 2)
+        return results or [], elapsed
     except asyncio.TimeoutError:
+        elapsed = round((time.perf_counter() - t0) * 1000, 2)
         warnings.append(f"{name} search timed out")
-        return []
+        return [], elapsed
     except Exception as e:
+        elapsed = round((time.perf_counter() - t0) * 1000, 2)
         warnings.append(f"{name} search unavailable: {e}")
-        return []
+        return [], elapsed
