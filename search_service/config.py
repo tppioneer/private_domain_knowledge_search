@@ -34,7 +34,7 @@ class ServiceConfig:
 
     # Embedding 模型
     embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-small-zh")
-    embedding_model_path: str = os.getenv("EMBEDDING_MODEL_PATH", "")  # 本地路径，离线环境使用
+    embedding_model_path: str = os.getenv("EMBEDDING_MODEL_PATH", "./models")  # 本地路径优先
 
     # 检索参数
     candidate_multiplier: int = int(os.getenv("CANDIDATE_MULTIPLIER", "3"))  # 每路检索取 top_k * N 候选
