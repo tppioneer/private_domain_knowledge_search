@@ -182,7 +182,11 @@ def _format_knowledge_item(item: dict, index: int) -> str:
         if class_name:
             lines.append(f"import: {class_name};")
         if return_type:
-            lines.append(f"返回类型: {return_type}")
+            rt_import = meta.get("return_type_import", "")
+            if rt_import:
+                lines.append(f"返回类型: {return_type} → import {rt_import};")
+            else:
+                lines.append(f"返回类型: {return_type}")
         if version:
             lines.append(f"SDK 版本: {version}")
 

@@ -54,6 +54,24 @@ class SearchContext(BaseModel):
 
 # ── search ──
 
+class SuggestedAlternative(BaseModel):
+    """高层替代 API 的推荐信息。"""
+    api: str = ""                          # 替代方法签名，如 "FileQueryManager.getShardFileService(tenantId)"
+    entry_method: str = ""                 # 入口方法，如 "FileQueryManager.getShardFileService(tenantId)"
+    full_call_chain: str = ""              # 完整调用链，如 "FileQueryManager.getShardFileService(tenantId).getFileSummary(fileId)"
+    description: str = ""                  # 说明，如 "通过 FileQueryManager 获取实例，自动注入租户上下文"
+
+
+class LayeredRecommendation(BaseModel):
+    """分层推荐项 —— 用于顶层 layered_recommendations 列表。"""
+    layer: str = "high"                    # high | mid | low
+    score: float = 0.0
+    content: str = ""                      # 推荐描述文本
+    description: str = ""
+    full_call_chain: str = ""              # 完整调用路径
+    entry_method: str = ""                 # 入口方法
+
+
 class KnowledgeMeta(BaseModel):
     sdk_class: Optional[str] = None
     method: Optional[str] = None
@@ -71,6 +89,12 @@ class KnowledgeMeta(BaseModel):
     related_ticket: Optional[str] = None
     knowledge_source: Optional[str] = None
     role: Optional[str] = None
+    # ── 层级标注（方案一） ──
+    layer: Optional[str] = None            # high | mid | low
+    requires_context_building: bool = False
+    context_dependencies: list[str] = Field(default_factory=list)
+    standard_context_provider: Optional[str] = None  # 如 "ContextManager.getCurrentTenantId()"
+    suggested_alternative: Optional[SuggestedAlternative] = None
 
 
 class KnowledgeItem(BaseModel):
@@ -99,6 +123,7 @@ class SearchRequest(BaseModel):
 class SearchResponse(BaseModel):
     items: list[KnowledgeItem] = Field(default_factory=list)
     diagnostics: Diagnostics = Field(default_factory=Diagnostics)
+    layered_recommendations: list[LayeredRecommendation] = Field(default_factory=list)
 
 
 # ── entity ──

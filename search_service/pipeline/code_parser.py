@@ -174,6 +174,7 @@ def parse_java_file(filepath: str, sdk_meta: dict) -> list[dict]:
 
     package_name = _extract_package(tree)
     javadoc_map = _extract_javadocs(source)
+    imports_map = _extract_imports(source)
     sdk_id = sdk_meta.get("artifact_id", "unknown")
     version = sdk_meta.get("version", "")
     class_stack: list[str] = [os.path.splitext(os.path.basename(filepath))[0]]
@@ -184,8 +185,11 @@ def parse_java_file(filepath: str, sdk_meta: dict) -> list[dict]:
     for path, node in tree:
         if isinstance(node, javalang.tree.ClassDeclaration):
             class_stack.append(node.name)
+        elif isinstance(node, javalang.tree.InterfaceDeclaration):
+            class_stack.append(node.name)
         elif isinstance(node, javalang.tree.MethodDeclaration):
-            if "public" not in node.modifiers:
+            # interface 方法默认 public，不显式包含 public modifier
+            if "public" not in node.modifiers and not _in_interface(path):
                 continue
             fqn = ".".join(class_stack[1:] + [node.name])
             method_nodes.append((node, fqn))
@@ -203,6 +207,7 @@ def parse_java_file(filepath: str, sdk_meta: dict) -> list[dict]:
     for node, fqn in method_nodes:
         chunk = _method_to_chunk(
             node, package_name, fqn, sdk_id, version, filepath, javadoc_map, role,
+            imports_map,
         )
         chunks.append(chunk)
 
@@ -395,6 +400,7 @@ def _method_to_chunk(
     node, package_name: str, full_method_name: str,
     sdk_id: str, version: str, filepath: str, javadoc_map: dict[int, str],
     role: str = "public_api",
+    imports_map: dict[str, str] | None = None,
 ) -> dict:
     params = _format_params(node.parameters)
     returns = node.return_type.name if node.return_type else "void"
@@ -410,11 +416,17 @@ def _method_to_chunk(
     line_no = node.position.line if node.position else 0
     javadoc = javadoc_map.get(line_no, "")
 
+    # 返回值类型 import 解析
+    imports = imports_map or {}
+    return_type_import = _resolve_return_type_import(returns, imports, package_name)
+
     # content: import + 全限定调用 + 返回类型（消除幻觉）
-    content_parts = [
-        f"import {class_fqn};",
-        f"{class_fqn.split('.')[-1]}.{node.name}({params}) → {returns}",
-    ]
+    content_parts = [f"import {class_fqn};"]
+    if return_type_import and return_type_import != class_fqn:
+        content_parts.append(f"import {return_type_import};")
+    content_parts.append(
+        f"{class_fqn.split('.')[-1]}.{node.name}({params}) → {returns}"
+    )
     if javadoc:
         content_parts.append("")
         content_parts.append(javadoc)
@@ -432,6 +444,8 @@ def _method_to_chunk(
         "calls": calls,
         "role": role,
     }
+    if return_type_import:
+        meta["return_type_import"] = return_type_import
     import json
     meta_json = json.dumps(meta, ensure_ascii=False)
 
@@ -514,6 +528,89 @@ def _extract_calls(method_node) -> list[str]:
 
 def _make_id(raw: str) -> str:
     return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+
+def _in_interface(path: list) -> bool:
+    """检查节点路径中是否包含 InterfaceDeclaration（即方法声明在 interface 内部）。"""
+    import javalang
+    return any(isinstance(p, javalang.tree.InterfaceDeclaration) for p in path)
+
+
+# java.lang 类型和原始类型，不需要 import
+_JAVA_LANG_TYPES: set[str] = {
+    "String", "Object", "Integer", "Long", "Float", "Double",
+    "Boolean", "Byte", "Short", "Character", "Number", "Class",
+    "void", "int", "long", "float", "double", "boolean", "byte", "short", "char",
+}
+_IMPORT_PATTERN = re.compile(
+    r"^import\s+(?:static\s+)?([\w.]+(?:\.[\w.]+)*(?:\.\*)?)\s*;",
+    re.MULTILINE,
+)
+_GENERIC_PATTERN = re.compile(r"<\s*(\w+(?:\.\w+)*)\s*>")  # 提取最内层泛型参数
+
+
+def _extract_imports(source: str) -> dict[str, str]:
+    """从 Java 源码提取 import 语句，构建 {simple_name: full_path} 映射。
+
+    - 常规 import: import com.example.Foo → {"Foo": "com.example.Foo"}
+    - 通配 import: import com.example.* → {"*": "com.example"}（兜底猜测用）
+    - 静态 import: import static ... → 跳过（方法导入，非类型）
+    - 内部类: import com.example.Foo.Bar → {"Bar": "com.example.Foo.Bar"}
+    """
+    imports: dict[str, str] = {}
+    for m in _IMPORT_PATTERN.finditer(source):
+        raw = m.group(1)
+        if raw.endswith(".*"):
+            imports.setdefault("*", raw[:-2])  # 多个通配时保留第一个
+        else:
+            simple = raw.rsplit(".", 1)[-1].split(".")[-1]
+            imports[simple] = raw
+    return imports
+
+
+def _extract_generic_type(return_type: str) -> str:
+    """提取泛型的类型参数。List<FileService> → FileService，List<List<Foo>> → Foo。"""
+    if not return_type:
+        return ""
+    # 去掉所有泛型层: 迭代匹配直到没有 <>
+    prev = ""
+    while prev != return_type:
+        prev = return_type
+        m = _GENERIC_PATTERN.search(return_type)
+        if m:
+            return_type = m.group(1)
+    return return_type.strip()
+
+
+def _resolve_return_type_import(
+    return_type: str,
+    imports_map: dict[str, str],
+    package_name: str,
+) -> str | None:
+    """根据 import 映射和包名解析返回值类型的完整路径。
+
+    Returns:
+        完整 import 路径，或 None（无需 import 或无法解析）。
+    """
+    if not return_type or return_type in _JAVA_LANG_TYPES:
+        return None
+    if return_type.startswith("java.lang."):
+        return None
+
+    # 泛型提取: List<FileService> → FileService
+    simple = _extract_generic_type(return_type)
+    if simple in _JAVA_LANG_TYPES or simple.startswith("java.lang."):
+        return None
+
+    # 1) import 映射精确匹配
+    if simple in imports_map:
+        return imports_map[simple]
+
+    # 2) 同包类型
+    if package_name:
+        return f"{package_name}.{simple}"
+
+    return None
 
 
 def parse_java_repo(repo_dir: str) -> list[dict]:

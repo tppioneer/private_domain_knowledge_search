@@ -32,3 +32,13 @@ def create_graph_searcher() -> SearcherProtocol:
         return GraphSearcher()
     from .backends.lite.graph import LiteGraphSearcher
     return LiteGraphSearcher(service_config.graph_storage_path)
+
+
+def create_entity_searcher():
+    """创建实体查询器 —— lite 模式用 SQLite，production 待实现。"""
+    if service_config.backend_mode == "production":
+        # TODO: 生产模式实体查询（可用 Neo4j 精确节点匹配）
+        from .backends.lite.entity import LiteEntitySearcher
+        return LiteEntitySearcher(service_config.sqlite_db_path)
+    from .backends.lite.entity import LiteEntitySearcher
+    return LiteEntitySearcher(service_config.sqlite_db_path)
