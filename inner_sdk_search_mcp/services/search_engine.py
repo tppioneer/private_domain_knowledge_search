@@ -21,7 +21,7 @@ class SearchEngine(ABC):
         knowledge_types: list[KnowledgeType] | None = None,
         top_k: int = 5,
         min_score: float = 0.7,
-    ) -> tuple[list[KnowledgeItem], Diagnostics]:
+    ) -> tuple[list[KnowledgeItem], Diagnostics, list]:
         ...
 
 
@@ -35,5 +35,5 @@ class MockSearchEngine(SearchEngine):
         knowledge_types: list[KnowledgeType] | None = None,
         top_k: int = 5,
         min_score: float = 0.7,
-    ) -> tuple[list[KnowledgeItem], Diagnostics]:
-        return [], Diagnostics(total_scanned=0, time_ms=0)
+    ) -> tuple[list[KnowledgeItem], Diagnostics, list]:
+        return [], Diagnostics(total_scanned=0, time_ms=0), []

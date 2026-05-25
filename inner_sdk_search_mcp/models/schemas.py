@@ -49,6 +49,24 @@ class Context(BaseModel):
 
 # ── search_private_knowledge 返回 ──
 
+class SuggestedAlternative(BaseModel):
+    """高层替代 API 的推荐信息。"""
+    api: str = ""
+    entry_method: str = ""
+    full_call_chain: str = ""
+    description: str = ""
+
+
+class LayeredRecommendation(BaseModel):
+    """分层推荐项 —— 用于顶层 layered_recommendations 列表。"""
+    layer: str = "high"
+    score: float = 0.0
+    content: str = ""
+    description: str = ""
+    full_call_chain: str = ""
+    entry_method: str = ""
+
+
 class KnowledgeMeta(BaseModel):
     sdk_class: Optional[str] = None
     method: Optional[str] = None
@@ -66,6 +84,12 @@ class KnowledgeMeta(BaseModel):
     related_ticket: Optional[str] = None
     knowledge_source: Optional[str] = None
     role: Optional[str] = None
+    # ── 层级标注（方案一） ──
+    layer: Optional[str] = None
+    requires_context_building: bool = False
+    context_dependencies: list[str] = Field(default_factory=list)
+    standard_context_provider: Optional[str] = None
+    suggested_alternative: Optional[SuggestedAlternative] = None
 
 
 class KnowledgeItem(BaseModel):
@@ -87,6 +111,7 @@ class SearchKnowledgeResponse(BaseModel):
     items: list[KnowledgeItem] = Field(default_factory=list)
     diagnostics: Diagnostics = Field(default_factory=Diagnostics)
     assembled_prompt: AssemblePromptOutput | None = None
+    layered_recommendations: list[LayeredRecommendation] = Field(default_factory=list)
 
 
 # ── get_entity_detail 返回 ──
@@ -109,6 +134,12 @@ class EntityDefinition(BaseModel):
     context_: Optional[str] = None
     synonyms: list[str] = Field(default_factory=list)
     related_terms: list[str] = Field(default_factory=list)
+    # ── 层级标注 ──
+    layer: Optional[str] = None
+    requires_context_building: bool = False
+    context_dependencies: list[str] = Field(default_factory=list)
+    standard_context_provider: Optional[str] = None
+    suggested_alternative: Optional[SuggestedAlternative] = None
 
 
 class EntityDetailResponse(BaseModel):

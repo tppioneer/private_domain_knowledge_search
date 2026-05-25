@@ -202,18 +202,27 @@ def parse_java_file(filepath: str, sdk_meta: dict) -> list[dict]:
     # 推断类的角色
     class_path = ".".join(class_stack[1:])
     role = _detect_class_role(package_name, class_path, method_nodes)
+    leaf_pkg = package_name.lower().split(".")[-1] if package_name else ""
+    class_fqn = f"{package_name}.{class_path}" if package_name else class_path
 
-    # 第二遍：生成 chunk
+    # 第二遍：生成 chunk（含层级标注）
     for node, fqn in method_nodes:
+        layer = _detect_method_layer(class_fqn, node.parameters, role, leaf_pkg)
+        ctx_deps = _detect_context_dependencies(node.parameters)
+        ctx_provider = _detect_standard_context_provider(class_fqn, ctx_deps) if ctx_deps else None
         chunk = _method_to_chunk(
             node, package_name, fqn, sdk_id, version, filepath, javadoc_map, role,
-            imports_map,
+            imports_map, layer, ctx_deps, ctx_provider,
         )
         chunks.append(chunk)
 
     for node, fqn in constructor_nodes:
+        layer = _detect_method_layer(class_fqn, node.parameters, role, leaf_pkg)
+        ctx_deps = _detect_context_dependencies(node.parameters)
+        ctx_provider = _detect_standard_context_provider(class_fqn, ctx_deps) if ctx_deps else None
         chunk = _constructor_to_chunk(
             node, package_name, fqn, sdk_id, version, filepath, javadoc_map, role,
+            layer, ctx_deps, ctx_provider,
         )
         chunks.append(chunk)
 
@@ -287,6 +296,114 @@ def _detect_class_role(
 
     # 兜底
     return "internal"
+
+
+# ── 层级标注（方案一） ──
+
+# High-Level 类名后缀
+_HIGH_LAYER_CLASS_SUFFIXES = (
+    "manager", "facade", "gateway", "helper", "builder", "bootstrap", "starter",
+)
+
+# Low-Level 类名关键词
+_LOW_LAYER_CLASS_KEYWORDS = ("impl", "internal")
+
+# 复杂参数类型关键词（需要上下文构建）
+_COMPLEX_PARAM_KEYWORDS = (
+    "context", "request", "response", "session", "config",
+    "configuration", "environment", "applicationcontext",
+)
+
+# 参数数量阈值：超过此值视为复杂 API
+_MAX_HIGH_LAYER_PARAMS = 2
+
+
+def _is_complex_param_type(type_name: str) -> bool:
+    """判断参数类型是否需要上下文构建（复杂对象）。"""
+    if not type_name:
+        return False
+    lower = type_name.lower()
+    for kw in _COMPLEX_PARAM_KEYWORDS:
+        if kw in lower:
+            return True
+    return False
+
+
+def _detect_method_layer(
+    class_name: str,
+    params: list,
+    class_role: str,
+    leaf_pkg: str,
+) -> str:
+    """根据类名、参数复杂度、角色推断方法层级: high | mid | low。
+
+    接口方法也按相同规则分层：高层接口直接作为推荐入口，
+    底层接口标注为 low 并后续查找高层替代。
+    """
+    simple_name = class_name.split(".")[-1].lower()
+
+    # 1) Low-Level：类名含 Impl / Internal
+    if any(kw in simple_name for kw in _LOW_LAYER_CLASS_KEYWORDS):
+        return "low"
+
+    # 2) Low-Level：参数含复杂对象（Context / Request 等）
+    for p in params:
+        type_name = p.type.name if p.type else ""
+        if _is_complex_param_type(type_name):
+            return "low"
+
+    # 3) High-Level：类名含 Manager / Facade / Gateway / Helper / Builder 等
+    is_high_class = simple_name.endswith(_HIGH_LAYER_CLASS_SUFFIXES)
+    has_few_params = len(params) <= _MAX_HIGH_LAYER_PARAMS
+
+    if is_high_class and has_few_params and class_role in ("entry_point", "public_api"):
+        return "high"
+
+    # 4) High-Level：入口类且参数少
+    if class_role == "entry_point" and has_few_params:
+        return "high"
+
+    # 5) 子包辅助判断
+    public_pkgs = {"service", "api", "client", "facade"}
+    if leaf_pkg in public_pkgs and not is_high_class:
+        return "mid"
+
+    internal_pkgs = {"dao", "config", "impl", "internal", "model", "dto", "vo"}
+    if leaf_pkg in internal_pkgs:
+        return "low"
+
+    # 6) 兜底：参数多 → mid，参数少但有业务逻辑 → mid
+    return "mid"
+
+
+def _detect_context_dependencies(params) -> list[str]:
+    """检测方法参数中的上下文依赖类型。"""
+    deps: list[str] = []
+    for p in params:
+        type_name = p.type.name if p.type else ""
+        if _is_complex_param_type(type_name):
+            deps.append(type_name)
+    return deps
+
+
+def _detect_standard_context_provider(
+    class_name: str,
+    context_deps: list[str],
+) -> str | None:
+    """推测标准上下文获取方式。
+
+    基于类名模式推测——例如 FileQueryManager 暗示
+    通过 ContextManager.getCurrentTenantId() 获取上下文。
+    """
+    if not context_deps:
+        return None
+    # 常见的上下文提供模式
+    if any("Context" in d for d in context_deps):
+        return "ContextManager.getCurrentTenantId()"
+    if any("Request" in d for d in context_deps):
+        simple = class_name.split(".")[-1]
+        return f"{simple}.buildRequest(...)"
+    return None
 
 
 def _all_getters_setters(method_nodes: list[tuple]) -> bool:
@@ -401,8 +518,11 @@ def _method_to_chunk(
     sdk_id: str, version: str, filepath: str, javadoc_map: dict[int, str],
     role: str = "public_api",
     imports_map: dict[str, str] | None = None,
+    layer: str = "mid",
+    context_deps: list[str] | None = None,
+    context_provider: str | None = None,
 ) -> dict:
-    params = _format_params(node.parameters)
+    params_str = _format_params(node.parameters)
     returns = node.return_type.name if node.return_type else "void"
 
     calls = _extract_calls(node)
@@ -425,7 +545,7 @@ def _method_to_chunk(
     if return_type_import and return_type_import != class_fqn:
         content_parts.append(f"import {return_type_import};")
     content_parts.append(
-        f"{class_fqn.split('.')[-1]}.{node.name}({params}) → {returns}"
+        f"{class_fqn.split('.')[-1]}.{node.name}({params_str}) → {returns}"
     )
     if javadoc:
         content_parts.append("")
@@ -443,9 +563,15 @@ def _method_to_chunk(
         "return_type": returns,
         "calls": calls,
         "role": role,
+        "layer": layer,
+        "requires_context_building": bool(context_deps),
     }
     if return_type_import:
         meta["return_type_import"] = return_type_import
+    if context_deps:
+        meta["context_dependencies"] = context_deps
+    if context_provider:
+        meta["standard_context_provider"] = context_provider
     import json
     meta_json = json.dumps(meta, ensure_ascii=False)
 
@@ -464,9 +590,12 @@ def _constructor_to_chunk(
     node, package_name: str, class_path: str,
     sdk_id: str, version: str, filepath: str, javadoc_map: dict[int, str],
     role: str = "public_api",
+    layer: str = "mid",
+    context_deps: list[str] | None = None,
+    context_provider: str | None = None,
 ) -> dict:
     """class_path: 包内类路径，如 "sdk.PointsException" 或 "PointsException" """
-    params = _format_params(node.parameters)
+    params_str = _format_params(node.parameters)
     class_simple = class_path.split(".")[-1]
 
     fqn = f"{package_name}.{class_path}" if package_name else class_path
@@ -477,7 +606,7 @@ def _constructor_to_chunk(
 
     content_parts = [
         f"import {fqn};",
-        f"new {class_simple}({params})",
+        f"new {class_simple}({params_str})",
     ]
     if javadoc:
         content_parts.append("")
@@ -491,6 +620,24 @@ def _constructor_to_chunk(
         "method": class_simple,
         "return_type": class_simple,
         "role": role,
+        "layer": layer,
+        "requires_context_building": bool(context_deps),
+    }
+    if context_deps:
+        meta["context_dependencies"] = context_deps
+    if context_provider:
+        meta["standard_context_provider"] = context_provider
+    import json
+    meta_json = json.dumps(meta, ensure_ascii=False)
+
+    return {
+        "id": chunk_id,
+        "type": "api",
+        "content": "\n".join(content_parts),
+        "title": f"{class_simple}.constructor",
+        "module": sdk_id,
+        "source_path": filepath,
+        "meta_json": meta_json,
     }
     import json
     meta_json = json.dumps(meta, ensure_ascii=False)

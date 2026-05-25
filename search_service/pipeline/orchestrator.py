@@ -81,9 +81,24 @@ def run(
     texts = [c["content"] for c in all_chunks]
     vectors = emb.embed(texts)
     ids = [c["id"] for c in all_chunks]
-    metas = [{"type": c["type"], "content": c["content"], "title": c["title"],
-              "module": c["module"], "source_path": c["source_path"]}
-             for c in all_chunks]
+    metas = []
+    for c in all_chunks:
+        m = {"type": c["type"], "content": c["content"], "title": c["title"],
+             "module": c["module"], "source_path": c["source_path"]}
+        meta_json_str = c.get("meta_json", "")
+        if meta_json_str:
+            try:
+                import json as _json2
+                parsed = _json2.loads(meta_json_str)
+                for key in ("role", "layer", "requires_context_building",
+                            "context_dependencies", "standard_context_provider",
+                            "class_name", "method", "return_type", "calls",
+                            "sdk", "version", "knowledge_source"):
+                    if key in parsed:
+                        m[key] = parsed[key]
+            except Exception:
+                pass
+        metas.append(m)
 
     vector_searcher = LiteVectorSearcher(service_config.faiss_index_dir)
     vec_count = vector_searcher.index_vectors(ids, vectors, metas)
@@ -92,11 +107,26 @@ def run(
     # ── 5. 图构建 ──
     graph = LiteGraphSearcher(service_config.graph_storage_path)
     for c in all_chunks:
-        graph.add_entity(c["id"], c["type"], c["content"], {
+        node_meta = {
             "title": c["title"],
             "module": c["module"],
             "source_path": c["source_path"],
-        })
+        }
+        # 合并 meta_json 中的结构化字段（层级、角色等）
+        meta_json_str = c.get("meta_json", "")
+        if meta_json_str:
+            try:
+                import json as _json
+                parsed = _json.loads(meta_json_str)
+                for key in ("role", "layer", "requires_context_building",
+                            "context_dependencies", "standard_context_provider",
+                            "class_name", "method", "return_type", "calls",
+                            "sdk", "version", "knowledge_source"):
+                    if key in parsed:
+                        node_meta[key] = parsed[key]
+            except Exception:
+                pass
+        graph.add_entity(c["id"], c["type"], c["content"], node_meta)
     # 为同 source 的块建立 RELATED_TO 关系
     source_chunks: dict[str, list[str]] = {}
     for c in all_chunks:

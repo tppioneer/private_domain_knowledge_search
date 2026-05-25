@@ -146,6 +146,12 @@ class EntityDefinition(BaseModel):
     context_: Optional[str] = Field(default=None, alias="context")
     synonyms: list[str] = Field(default_factory=list)
     related_terms: list[str] = Field(default_factory=list)
+    # ── 层级标注 ──
+    layer: Optional[str] = None
+    requires_context_building: bool = False
+    context_dependencies: list[str] = Field(default_factory=list)
+    standard_context_provider: Optional[str] = None
+    suggested_alternative: Optional[SuggestedAlternative] = None
 
 
 class EntityDetailResponse(BaseModel):

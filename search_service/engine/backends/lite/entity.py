@@ -14,6 +14,8 @@ import logging
 import sqlite3
 import os
 
+from . import sanitize_fts5_query
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,8 +56,8 @@ class LiteEntitySearcher:
         """从 SQLite FTS5 检索候选实体。"""
         conn = sqlite3.connect(self.db_path)
         try:
-            # 用 FTS5 进行宽泛文本召回（分词后的词 OR 匹配）
-            fts_query = " OR ".join(name.replace(".", " ").split())
+            # 用 FTS5 进行宽泛文本召回，特殊字符消毒
+            fts_query = sanitize_fts5_query(name)
             sql = """
                 SELECT doc_id, type, content, title, module, meta_json
                 FROM knowledge_fts

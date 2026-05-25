@@ -29,7 +29,7 @@ class HybridSearcher:
         knowledge_types: list[KnowledgeType] | None = None,
         top_k: int = 5,
         min_score: float = 0.7,
-    ) -> tuple[list[KnowledgeItem], Diagnostics]:
+    ) -> tuple[list[KnowledgeItem], Diagnostics, list]:
         candidate_k = top_k * service_config.candidate_multiplier
         warnings: list[str] = []
 
@@ -67,7 +67,7 @@ class HybridSearcher:
         fused = list(merged.values())
 
         # ── 重排序 ──
-        ranked = rerank(fused, query)
+        ranked, layered_recs = rerank(fused, query, getattr(context, 'module', None))
 
         # ── 裁剪 ──
         filtered = [item for item in ranked if item.score >= min_score][:top_k]
@@ -78,7 +78,7 @@ class HybridSearcher:
             backend_ms={"bm25": bm25_ms, "vector": vector_ms, "graph": graph_ms},
             warnings=warnings,
         )
-        return filtered, diagnostics
+        return filtered, diagnostics, layered_recs
 
 
 async def _safe_search(

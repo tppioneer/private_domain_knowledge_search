@@ -7,7 +7,7 @@ import logging
 import httpx
 
 from ..config import server_config
-from ..models.schemas import Context, Diagnostics, KnowledgeItem, KnowledgeMeta, KnowledgeType
+from ..models.schemas import Context, Diagnostics, KnowledgeItem, KnowledgeMeta, KnowledgeType, LayeredRecommendation
 from .search_engine import SearchEngine
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ class RemoteSearchEngine(SearchEngine):
     @property
     def client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
+            self._client = httpx.AsyncClient(timeout=httpx.Timeout(5.0), trust_env=False)
         return self._client
 
     async def search(
@@ -33,7 +33,7 @@ class RemoteSearchEngine(SearchEngine):
         knowledge_types: list[KnowledgeType] | None = None,
         top_k: int = 5,
         min_score: float = 0.7,
-    ) -> tuple[list[KnowledgeItem], Diagnostics]:
+    ) -> tuple[list[KnowledgeItem], Diagnostics, list]:
         url = f"{self.base_url}/api/v1/search"
         body: dict = {
             "query": query,
@@ -51,10 +51,10 @@ class RemoteSearchEngine(SearchEngine):
             resp = await self.client.post(url, json=body)
         except httpx.ConnectError:
             logger.error("search service unreachable: %s", url)
-            return [], Diagnostics(total_scanned=0, time_ms=0, warnings=["search service unreachable: connection refused"])
+            return [], Diagnostics(total_scanned=0, time_ms=0, warnings=["search service unreachable: connection refused"]), []
         except httpx.TimeoutException:
             logger.error("search service timeout: %s query=%s", url, query[:100])
-            return [], Diagnostics(total_scanned=0, time_ms=0, warnings=["search service timeout"])
+            return [], Diagnostics(total_scanned=0, time_ms=0, warnings=["search service timeout"]), []
         except httpx.HTTPStatusError as e:
             logger.error(
                 "search service HTTP %d: %s query=%s response=%s",
@@ -62,10 +62,10 @@ class RemoteSearchEngine(SearchEngine):
                 e.response.text[:200] if e.response.text else "",
             )
             return [], Diagnostics(total_scanned=0, time_ms=0,
-                                    warnings=[f"search service returned HTTP {e.response.status_code}"])
+                                    warnings=[f"search service returned HTTP {e.response.status_code}"]), []
         except Exception:
             logger.exception("search service unexpected error: %s query=%s", url, query[:100])
-            return [], Diagnostics(total_scanned=0, time_ms=0, warnings=["search service error"])
+            return [], Diagnostics(total_scanned=0, time_ms=0, warnings=["search service error"]), []
 
         data = resp.json()
         item_count = len(data.get("items", []))
@@ -91,4 +91,8 @@ class RemoteSearchEngine(SearchEngine):
             backend_ms=diag.get("backend_ms", {}),
             warnings=diag.get("warnings", []),
         )
-        return items, diagnostics
+        layered_recs = [
+            LayeredRecommendation(**rec)
+            for rec in data.get("layered_recommendations", [])
+        ]
+        return items, diagnostics, layered_recs

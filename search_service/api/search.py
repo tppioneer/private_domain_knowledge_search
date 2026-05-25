@@ -19,7 +19,7 @@ async def search(request: SearchRequest) -> SearchResponse:
     try:
         from ..engine.hybrid_searcher import HybridSearcher
         searcher = HybridSearcher()
-        items, diagnostics = await searcher.search(
+        items, diagnostics, layered_recs = await searcher.search(
             query=request.query,
             context=request.context,
             knowledge_types=request.knowledge_types,
@@ -29,14 +29,16 @@ async def search(request: SearchRequest) -> SearchResponse:
         if not items:
             items, diagnostics = _mock_search(request)
             diagnostics.warnings.append("engine returned no results, fallback to mock")
+            layered_recs = []
     except Exception:
         items, diagnostics = _mock_search(request)
         diagnostics.warnings.append("engine unavailable, fallback to mock")
+        layered_recs = []
 
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     diagnostics.time_ms = elapsed_ms
 
-    return SearchResponse(items=items, diagnostics=diagnostics)
+    return SearchResponse(items=items, diagnostics=diagnostics, layered_recommendations=layered_recs)
 
 
 def _mock_search(request: SearchRequest) -> tuple[list[KnowledgeItem], Diagnostics]:

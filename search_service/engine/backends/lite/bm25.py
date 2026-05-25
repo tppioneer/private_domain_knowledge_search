@@ -7,6 +7,7 @@ import sqlite3
 import os
 
 from ....models.schemas import KnowledgeItem, KnowledgeMeta, KnowledgeType, SearchContext
+from . import sanitize_fts5_query
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +67,8 @@ class LiteBM25Searcher:
     ) -> list[KnowledgeItem]:
         conn = sqlite3.connect(self.db_path)
 
-        # FTS5 多词默认 AND，改为 OR 提升召回
-        fts_query = " OR ".join(query.split())
+        # FTS5 多词默认 AND，改为 OR 提升召回；特殊字符消毒
+        fts_query = sanitize_fts5_query(query)
         conditions = ["knowledge_fts MATCH ?"]
         params: list = [fts_query]
 

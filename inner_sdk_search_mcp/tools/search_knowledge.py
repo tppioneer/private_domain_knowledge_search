@@ -29,7 +29,7 @@ async def search_private_knowledge(
 ) -> SearchKnowledgeResponse:
     top_k = min(top_k, 10)
 
-    items, diagnostics = await engine.search(
+    items, diagnostics, layered_recs = await engine.search(
         query=query,
         context=context,
         knowledge_types=knowledge_types,
@@ -37,7 +37,9 @@ async def search_private_knowledge(
         min_score=min_score,
     )
 
-    response = SearchKnowledgeResponse(items=items, diagnostics=diagnostics)
+    response = SearchKnowledgeResponse(
+        items=items, diagnostics=diagnostics, layered_recommendations=layered_recs,
+    )
 
     if auto_assemble and auto_assemble.enabled and items:
         from ..prompt.assemble_prompt import assemble_prompt as run_assemble_prompt

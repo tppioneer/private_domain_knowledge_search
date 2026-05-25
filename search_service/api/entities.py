@@ -100,6 +100,17 @@ def _build_response(
     is_api = chunk.get("type") in ("api", "term")  # 两种都可能
     entity_type = EntityType.API if is_api else EntityType.TERM
 
+    # 层级字段
+    layer = meta.get("layer")
+    requires_context = meta.get("requires_context_building", False)
+    context_deps = meta.get("context_dependencies", [])
+    context_provider = meta.get("standard_context_provider")
+    suggested_alt = meta.get("suggested_alternative")
+    alt_obj = None
+    if suggested_alt and isinstance(suggested_alt, dict):
+        from ..models.schemas import SuggestedAlternative
+        alt_obj = SuggestedAlternative(**suggested_alt)
+
     return EntityDetailResponse(
         entity_name=name,
         entity_type=entity_type,
@@ -109,6 +120,11 @@ def _build_response(
             return_type=signature_return or None,
             since_version=version or None,
             code_example=_build_code_example(class_name, method, params, signature_return or return_type),
+            layer=layer,
+            requires_context_building=requires_context,
+            context_dependencies=context_deps,
+            standard_context_provider=context_provider,
+            suggested_alternative=alt_obj,
         ),
     )
 

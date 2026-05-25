@@ -87,7 +87,8 @@ def _build_entry_hint(entry_names: list[str]) -> str:
     names_str = "、".join(entry_names)
     return (
         f"**SDK 使用提示：** 此 SDK 通过 `{names_str}` 提供统一入口，"
-        f"请使用其工厂/静态方法获取服务实例，标记为 `[internal]` 的 DAO/Config 类不应直接实例化。\n"
+        f"请优先使用其工厂/静态方法获取服务实例。标记为 `[底层·需上下文]` 的 API 需要构建 Context，"
+        f"建议通过推荐方案(High-Level)获取已封装上下文的实例。\n"
         f"如需组合多个方法调用，优先查看 entry_point 类是否已提供现成方法。"
     )
 
@@ -156,7 +157,6 @@ def _format_knowledge_item(item: dict, index: int) -> str:
         "spec": "规范契约",
         "test_template": "测试模板",
         "document": "文档",
-        "spec": "规范契约",
     }
     label = type_labels.get(item_type, item_type)
 
@@ -175,6 +175,29 @@ def _format_knowledge_item(item: dict, index: int) -> str:
         role_label = {"entry_point": " [统一入口]", "public_api": " [公开API]", "internal": " [内部实现]"}.get(role, "")
         if role_label:
             lines.append(f"SDK 角色: {role_label}")
+
+        # 层级标注
+        layer = meta.get("layer", "")
+        layer_labels = {"high": " [高层·推荐]", "mid": " [中层]", "low": " [底层·需上下文]"}
+        layer_label = layer_labels.get(layer, "")
+        if layer_label:
+            lines.append(f"API 层级: {layer_label}")
+
+        # 上下文构建提示
+        if meta.get("requires_context_building"):
+            provider = meta.get("standard_context_provider", "")
+            if provider:
+                lines.append(f"上下文获取: {provider}")
+            ctx_deps = meta.get("context_dependencies", [])
+            if ctx_deps:
+                lines.append(f"所需上下文: {', '.join(ctx_deps)}")
+
+        # 推荐替代（底层 API → 高层入口）
+        alt = meta.get("suggested_alternative")
+        if alt and isinstance(alt, dict) and alt.get("full_call_chain"):
+            lines.append(f">>> 推荐替代方案(High-Level): {alt['full_call_chain']}")
+            if alt.get("description"):
+                lines.append(f"    说明: {alt['description']}")
 
         class_name = meta.get("class_name", "")
         return_type = meta.get("return_type", "")
@@ -214,6 +237,39 @@ def _format_knowledge_item(item: dict, index: int) -> str:
 
     lines.append("")
     return "\n".join(lines)
+
+
+def _detect_same_name_conflicts(items: list[dict]) -> list[dict]:
+    """检测可能同名的不同功能方法，标注为冲突警告。
+
+    Returns:
+        [{"method": "getFileSummary", "variants": [class1, class2], "warning": "..."}]
+    """
+    method_map: dict[str, list[dict]] = {}
+    for item in items:
+        meta = item.get("meta", {})
+        method = meta.get("method", "")
+        if not method:
+            continue
+        method_map.setdefault(method, []).append(item)
+
+    conflicts: list[dict] = []
+    for method, variants in method_map.items():
+        if len(variants) < 2:
+            continue
+        classes = [v.get("meta", {}).get("class_name", "").rsplit(".", 1)[-1] for v in variants]
+        # 去重后仍多类 → 同名不同功能
+        unique_classes = list(dict.fromkeys(classes))
+        if len(unique_classes) >= 2:
+            conflicts.append({
+                "method": method,
+                "variants": unique_classes,
+                "warning": (
+                    f"注意：存在同名方法 {method}，分别属于 {', '.join(unique_classes)}，"
+                    f"功能可能不同，请根据类名选择正确的方法。"
+                ),
+            })
+    return conflicts
 
 
 def assemble_sections(
@@ -302,8 +358,23 @@ def assemble_sections(
             background_parts.append(hint + "\n")
             current_tokens += _estimate_tokens(hint)
 
+        # 同名冲突检测
+        conflicts = _detect_same_name_conflicts(sdk_items)
+        if conflicts:
+            for c in conflicts:
+                warning_line = f"> ⚠ {c['warning']}"
+                background_parts.append(warning_line + "\n")
+                current_tokens += _estimate_tokens(warning_line)
+
         background_parts.append("### 方法签名（SDK 源码）\n")
         current_tokens += _estimate_tokens(background_parts[-1])
+
+        # 层级优先排序：high > mid > low，同级按 score 降序
+        layer_order = {"high": 0, "mid": 1, "low": 2}
+        sdk_items.sort(key=lambda x: (
+            layer_order.get(x.get("meta", {}).get("layer", "mid"), 1),
+            -(x.get("score", 0)),
+        ))
 
         # 按返回值类型链分组（entry_point 方法 + 其返回值接口的方法）
         groups = _group_by_return_chain(sdk_items)

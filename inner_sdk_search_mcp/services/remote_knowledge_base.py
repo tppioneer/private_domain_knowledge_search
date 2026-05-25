@@ -46,7 +46,7 @@ class RemoteKnowledgeBase(KnowledgeBase):
     @property
     def client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(5.0))
+            self._client = httpx.AsyncClient(timeout=httpx.Timeout(5.0), trust_env=False)
         return self._client
 
     async def get_entity(
