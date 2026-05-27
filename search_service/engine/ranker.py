@@ -39,6 +39,9 @@ _LAYER_BOOST: dict[str, float] = {
 # 入口方法有返回值类型时额外加成（gateway 信号）
 _GATEWAY_BOOST = 1.15
 
+# 构造入口方法加成 —— builder/static_factory/singleton/constructor 排到同类方法最前面
+_CONSTRUCTION_BOOST = 1.25
+
 # 无需展开返回值的类型
 _SKIP_RETURN_TYPES = {
     "void", "int", "long", "float", "double", "boolean", "byte", "short", "char",
@@ -116,6 +119,10 @@ def rerank(
             rt = (item.meta.return_type or "").strip() if item.meta else ""
             if rt and rt not in _SKIP_RETURN_TYPES:
                 boost *= _GATEWAY_BOOST
+
+        # 构造入口加成 —— newBuilder/getInstance 等方法排最前
+        if item.meta and item.meta.construction_pattern:
+            boost *= _CONSTRUCTION_BOOST
 
         item.score = round(item.score * boost, 4)
 

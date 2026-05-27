@@ -76,8 +76,9 @@
   - **SDK 角色 boost**（entry vs internal 差距 3.3x）：entry_point(1.0) > public_api(0.80) > internal(0.55)
   - **层级 boost**（high vs low 差距 2.7x，无条件生效）：high(1.50) > mid(1.0) > low(0.55)
   - **入口 gateway 加成**：entry_point + 有 return_type 且非基本类型 → ×1.15
+  - **构造入口加成**（v1.5）：有 construction_pattern（builder/static_factory/singleton/constructor）→ ×1.25
   - **关键词命中加成**：每个命中 ×1.03（乘法缩放）
-- 公式：`final = score × type × role × layer × gateway × keyword`
+- 公式：`final = score × type × role × layer × gateway × construction × keyword`
 - 归一化到 [0, 1]，min_score 过滤 + Top-K 截断
 - **关键设计**：角色和层级 boost 不再需要语义阈值门控，确保通用查询（如"文件操作"）入口方法优先于底层实现
 
@@ -112,8 +113,9 @@
   - `low`：类名含 impl/internal；或参数含 Context/Request/Config 等复杂对象；或 dao/config 子包
   - 关键修复：entry_point 接收 Config 等参数是正常工厂模式，不应被误标为 low
 - **返回值类型链分组**：entry_point 方法绑定其返回值接口的方法（`_group_by_return_chain`），正向（入口→子方法）+ 反向（"获取此实例"提示）
+- **构造入口检测**（v1.5）：`_detect_construction_pattern()` 识别四种构造模式（builder/static_factory/singleton/constructor），rank 加成 1.25
+- **精确构造指引**：assembler 和 search_private_knowledge 根据构造模式生成精确调用指引（如"`FileServiceManager` 通过静态工厂构造：`getSystemService(...)` → `FileService`"）
 - **返回值链展开**（v1.4）：`_expand_return_chain()` 在搜索阶段自动补全，不再依赖 assemble 工具
-- 条件入口提示：有 entry_point 类时注入 SDK 使用提示
 
 ### P14. 三大应用场景工作流
 - **需求开发**（已测试通过）：检索关联 API + 历史方案 + 规范 → 生成符合企业规范的代码骨架

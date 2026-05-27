@@ -405,6 +405,31 @@ def _detect_standard_context_provider(
     return None
 
 
+def _detect_construction_pattern(node, return_type: str) -> str:
+    """检测方法是否为 SDK 实例的构造入口。
+
+    Returns:
+        "builder" | "static_factory" | "singleton" | "constructor" | ""
+    """
+    import javalang
+    modifiers = node.modifiers if hasattr(node, "modifiers") else []
+    is_static = "static" in modifiers
+
+    if isinstance(node, javalang.tree.ConstructorDeclaration):
+        return "constructor"
+
+    if node.name in ("newBuilder", "builder") and is_static:
+        return "builder"
+
+    _PRIMITIVE = {"void", "int", "long", "float", "double", "boolean", "byte", "short", "char"}
+    if is_static and return_type and return_type not in _PRIMITIVE:
+        if node.name in ("getInstance", "getDefault", "getSingleton", "instance"):
+            return "singleton"
+        return "static_factory"
+
+    return ""
+
+
 def _all_getters_setters(method_nodes: list[tuple]) -> bool:
     """判断所有方法是否都是 getter/setter（isXxx / getXxx / setXxx）。"""
     if not method_nodes:
@@ -525,6 +550,7 @@ def _method_to_chunk(
     returns = node.return_type.name if node.return_type else "void"
 
     calls = _extract_calls(node)
+    construction = _detect_construction_pattern(node, returns)
 
     # 完整限定名: package.ClassName.method → 即 import 路径
     fqn = f"{package_name}.{full_method_name}" if package_name else full_method_name
@@ -567,6 +593,8 @@ def _method_to_chunk(
     }
     if return_type_import:
         meta["return_type_import"] = return_type_import
+    if construction:
+        meta["construction_pattern"] = construction
     if context_deps:
         meta["context_dependencies"] = context_deps
     if context_provider:
@@ -621,6 +649,7 @@ def _constructor_to_chunk(
         "role": role,
         "layer": layer,
         "requires_context_building": bool(context_deps),
+        "construction_pattern": "constructor",
     }
     if context_deps:
         meta["context_dependencies"] = context_deps

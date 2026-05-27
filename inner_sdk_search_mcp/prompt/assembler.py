@@ -66,31 +66,94 @@ def _group_key(item_type: str) -> int:
     return _TYPE_ORDER.get(item_type, 999)
 
 
-def _collect_entry_points(sdk_items: list[dict]) -> list[str]:
-    """从 SDK 条目中收集 role=entry_point 的类名（去重）。"""
-    entry_names: list[str] = []
+def _collect_entry_points(sdk_items: list[dict]) -> dict[str, list[dict]]:
+    """从 SDK 条目中收集 entry_point 类及其构造方法。
+
+    Returns:
+        {class_fqn: [construction_method_items, ...]}
+        每个 item 含 meta 中的 method / return_type / construction_pattern 等
+    """
+    entry_map: dict[str, list[dict]] = {}
     seen: set[str] = set()
     for item in sdk_items:
         meta = item.get("meta", {})
-        if meta.get("role") == "entry_point":
-            name = meta.get("class_name", "")
-            if name and name not in seen:
-                seen.add(name)
-                entry_names.append(name)
-    return entry_names
+        if meta.get("role") != "entry_point":
+            continue
+        fqn = meta.get("class_name", "")
+        if not fqn:
+            continue
+        seen.add(fqn)
+        if meta.get("construction_pattern"):
+            entry_map.setdefault(fqn, []).append(item)
+    return entry_map
 
 
-def _build_entry_hint(entry_names: list[str]) -> str:
-    """根据入口类列表构造使用提示。无入口类时返回空字符串。"""
-    if not entry_names:
+def _build_entry_hint(entry_map: dict[str, list[dict]]) -> str:
+    """根据入口类及构造方法构造精确的使用指引。
+
+    - 有构造方法时：给出具体的调用示例
+    - 无构造方法时：降级为类名列表 + 通用提示
+    """
+    if not entry_map:
         return ""
-    names_str = "、".join(entry_names)
-    return (
-        f"**SDK 使用提示：** 此 SDK 通过 `{names_str}` 提供统一入口，"
-        f"请优先使用其工厂/静态方法获取服务实例。标记为 `[底层·需上下文]` 的 API 需要构建 Context，"
-        f"建议通过推荐方案(High-Level)获取已封装上下文的实例。\n"
-        f"如需组合多个方法调用，优先查看 entry_point 类是否已提供现成方法。"
+
+    hints: list[str] = []
+    for fqn, methods in entry_map.items():
+        simple = fqn.rsplit(".", 1)[-1]
+        # 按构造类型分组
+        by_pattern: dict[str, list[dict]] = {}
+        for m in methods:
+            cp = m.get("meta", {}).get("construction_pattern", "static_factory")
+            by_pattern.setdefault(cp, []).append(m)
+
+        # 优先展示最常用的构造模式（builder > static_factory > singleton > constructor）
+        for cp in ("builder", "static_factory", "singleton", "constructor"):
+            cp_methods = by_pattern.get(cp, [])
+            if not cp_methods:
+                continue
+            if cp == "builder":
+                # Builder 模式: newBuilder() → ClientBuilder → .build() → Client
+                b_method = cp_methods[0]["meta"]["method"]
+                hints.append(
+                    f"`{simple}` 通过 Builder 模式构造："
+                    f"`{simple}.{b_method}().build()` 创建客户端实例"
+                )
+            elif cp == "static_factory":
+                # 静态工厂: getSystemService(config) → FileService
+                example = cp_methods[0]
+                em = example.get("meta", {})
+                m_name = em.get("method", "")
+                rt = em.get("return_type", "")
+                rt_simple = rt.rsplit(".", 1)[-1] if rt else ""
+                hints.append(
+                    f"`{simple}` 通过静态工厂构造："
+                    f"`{simple}.{m_name}(...)` → `{rt_simple}`"
+                )
+                # 多工厂方法提示
+                if len(cp_methods) > 1:
+                    others = [m.get("meta", {}).get("method", "") for m in cp_methods[1:]]
+                    hints[-1] += f"（另可选 `{', '.join(others)}`）"
+            elif cp == "singleton":
+                m_name = cp_methods[0].get("meta", {}).get("method", "")
+                hints.append(f"`{simple}` 通过单例获取：`{simple}.{m_name}()`")
+            elif cp == "constructor":
+                hints.append(f"`{simple}` 通过构造函数 `new {simple}(...)` 直接实例化")
+            break  # 只展示最优先的一种模式
+
+    if not hints:
+        # 有 entry_point 类但没有构造方法——降级为类名提示
+        names_str = "、".join(fqn.rsplit(".", 1)[-1] for fqn in entry_map)
+        hints.append(
+            f"`{names_str}` 提供统一入口，请使用其工厂/静态方法获取服务实例"
+        )
+
+    hint_text = "**SDK 使用提示：** " + "；".join(hints) + "。\n"
+    hint_text += (
+        "标记为 `[底层·需上下文]` 的 API 需要构建 Context，"
+        "建议通过推荐方案(High-Level)获取已封装上下文的实例。\n"
+        "如需组合多个方法调用，优先查看 entry_point 类是否已提供现成方法。"
     )
+    return hint_text
 
 
 def _group_by_return_chain(sdk_items: list[dict]) -> list[dict]:
@@ -182,6 +245,14 @@ def _format_knowledge_item(item: dict, index: int) -> str:
         layer_label = layer_labels.get(layer, "")
         if layer_label:
             lines.append(f"API 层级: {layer_label}")
+
+        # 构造入口标注
+        cp = meta.get("construction_pattern", "")
+        cp_labels = {"builder": " [构造入口·Builder]", "static_factory": " [构造入口·静态工厂]",
+                     "singleton": " [构造入口·单例]", "constructor": " [构造入口]"}
+        cp_label = cp_labels.get(cp, "")
+        if cp_label:
+            lines.append(f"实例化方式: {cp_label}")
 
         # 上下文构建提示
         if meta.get("requires_context_building"):

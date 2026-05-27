@@ -95,6 +95,7 @@ class KnowledgeMeta(BaseModel):
     role: Optional[str] = None
     # ── 层级标注（方案一） ──
     layer: Optional[str] = None            # high | mid | low
+    construction_pattern: Optional[str] = None  # builder | static_factory | singleton | constructor
     requires_context_building: bool = False
     context_dependencies: list[str] = Field(default_factory=list)
     standard_context_provider: Optional[str] = None  # 如 "ContextManager.getCurrentTenantId()"

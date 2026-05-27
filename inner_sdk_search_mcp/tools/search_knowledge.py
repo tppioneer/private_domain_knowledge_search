@@ -17,6 +17,67 @@ from ..services.search_engine import SearchEngine
 logger = logging.getLogger(__name__)
 
 
+_CP_LABELS: dict[str, str] = {
+    "builder": "Builder 模式：`{cls}.{method}().build()` 创建实例",
+    "static_factory": "静态工厂：`{cls}.{method}(...)` → `{ret}`",
+    "singleton": "单例模式：`{cls}.{method}()`",
+    "constructor": "构造函数：`new {cls}(...)`",
+}
+
+
+def _build_construction_guide(items: list) -> str:
+    """从检索结果中提取入口类的构造方法，生成构造指引文本。"""
+    from ..models.schemas import KnowledgeItem, KnowledgeMeta
+
+    entry_cons: dict[str, list[dict]] = {}
+    for item in items:
+        meta = item.meta if hasattr(item, "meta") else item.get("meta", {})
+        if hasattr(meta, "role"):
+            role = meta.role
+            cp = meta.construction_pattern
+            fqn = meta.class_name or ""
+            method = meta.method or ""
+            rt = meta.return_type or ""
+        elif isinstance(meta, dict):
+            role = meta.get("role", "")
+            cp = meta.get("construction_pattern", "")
+            fqn = meta.get("class_name", "")
+            method = meta.get("method", "")
+            rt = meta.get("return_type", "")
+        else:
+            continue
+        if role == "entry_point" and cp:
+            entry_cons.setdefault(fqn, []).append({
+                "method": method, "pattern": cp,
+                "ret": rt.rsplit(".", 1)[-1] if rt else "",
+            })
+
+    if not entry_cons:
+        return ""
+
+    lines: list[str] = []
+    for fqn, methods in entry_cons.items():
+        simple = fqn.rsplit(".", 1)[-1]
+        by_pattern: dict[str, list[dict]] = {}
+        for m in methods:
+            by_pattern.setdefault(m["pattern"], []).append(m)
+
+        for pattern in ("builder", "static_factory", "singleton", "constructor"):
+            ms = by_pattern.get(pattern, [])
+            if not ms:
+                continue
+            template = _CP_LABELS.get(pattern, "")
+            m = ms[0]
+            line = template.format(cls=simple, method=m["method"], ret=m["ret"])
+            if len(ms) > 1:
+                others = [x["method"] for x in ms[1:]]
+                line += f"（另可选 `{'`, `'.join(others)}`）"
+            lines.append(line)
+            break
+
+    return "；".join(lines)
+
+
 async def search_private_knowledge(
     engine: SearchEngine,
     query: str,
@@ -37,8 +98,12 @@ async def search_private_knowledge(
         min_score=min_score,
     )
 
+    guide = _build_construction_guide(items)
+
     response = SearchKnowledgeResponse(
-        items=items, diagnostics=diagnostics, layered_recommendations=layered_recs,
+        items=items, diagnostics=diagnostics,
+        layered_recommendations=layered_recs,
+        construction_guide=guide,
     )
 
     if auto_assemble and auto_assemble.enabled and items:

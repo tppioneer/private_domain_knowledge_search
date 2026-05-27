@@ -90,6 +90,7 @@ class KnowledgeMeta(BaseModel):
     role: Optional[str] = None
     # ── 层级标注（方案一） ──
     layer: Optional[str] = None
+    construction_pattern: Optional[str] = None  # builder | static_factory | singleton | constructor
     requires_context_building: bool = False
     context_dependencies: list[str] = Field(default_factory=list)
     standard_context_provider: Optional[str] = None
@@ -116,6 +117,7 @@ class SearchKnowledgeResponse(BaseModel):
     diagnostics: Diagnostics = Field(default_factory=Diagnostics)
     assembled_prompt: AssemblePromptOutput | None = None
     layered_recommendations: list[LayeredRecommendation] = Field(default_factory=list)
+    construction_guide: str = ""  # 构造入口指引文本
 
 
 # ── get_entity_detail 返回 ──
