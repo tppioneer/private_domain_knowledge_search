@@ -337,8 +337,7 @@ def _detect_method_layer(
 ) -> str:
     """根据类名、参数复杂度、角色推断方法层级: high | mid | low。
 
-    接口方法也按相同规则分层：高层接口直接作为推荐入口，
-    底层接口标注为 low 并后续查找高层替代。
+    entry_point 方法无条件 high——工厂/入口方法接收 Config 等复杂参数是正常模式。
     """
     simple_name = class_name.split(".")[-1].lower()
 
@@ -346,22 +345,22 @@ def _detect_method_layer(
     if any(kw in simple_name for kw in _LOW_LAYER_CLASS_KEYWORDS):
         return "low"
 
-    # 2) Low-Level：参数含复杂对象（Context / Request 等）
-    for p in params:
-        type_name = p.type.name if p.type else ""
-        if _is_complex_param_type(type_name):
-            return "low"
+    # 2) entry_point 无条件 high
+    if class_role == "entry_point":
+        return "high"
 
-    # 3) High-Level：类名含 Manager / Facade / Gateway / Helper / Builder 等
+    # 3) High-Level：类名含 Manager / Facade / Gateway / Helper 等
     is_high_class = simple_name.endswith(_HIGH_LAYER_CLASS_SUFFIXES)
     has_few_params = len(params) <= _MAX_HIGH_LAYER_PARAMS
 
     if is_high_class and has_few_params and class_role in ("entry_point", "public_api"):
         return "high"
 
-    # 4) High-Level：入口类且参数少
-    if class_role == "entry_point" and has_few_params:
-        return "high"
+    # 4) Low-Level：参数含复杂对象（Context / Request 等，entry 已排除）
+    for p in params:
+        type_name = p.type.name if p.type else ""
+        if _is_complex_param_type(type_name):
+            return "low"
 
     # 5) 子包辅助判断
     public_pkgs = {"service", "api", "client", "facade"}
@@ -372,7 +371,7 @@ def _detect_method_layer(
     if leaf_pkg in internal_pkgs:
         return "low"
 
-    # 6) 兜底：参数多 → mid，参数少但有业务逻辑 → mid
+    # 6) 兜底
     return "mid"
 
 

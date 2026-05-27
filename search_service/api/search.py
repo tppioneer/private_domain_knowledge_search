@@ -10,6 +10,13 @@ from ..models.schemas import Diagnostics, KnowledgeItem, KnowledgeMeta, Knowledg
 
 router = APIRouter()
 
+# 无需展开返回值的类型
+_SKIP_RETURN_TYPES = {
+    "void", "int", "long", "float", "double", "boolean", "byte", "short", "char",
+    "String", "Object", "Integer", "Long", "Float", "Double", "Boolean", "Byte", "Short",
+    "Number", "Class", "List", "Map", "Set", "Collection",
+}
+
 
 @router.post("/search", response_model=SearchResponse)
 async def search(request: SearchRequest) -> SearchResponse:
@@ -30,6 +37,11 @@ async def search(request: SearchRequest) -> SearchResponse:
             items, diagnostics = _mock_search(request)
             diagnostics.warnings.append("engine returned no results, fallback to mock")
             layered_recs = []
+        else:
+            # 展开 entry_point 返回值类型的方法链
+            expanded = _expand_return_chain(items, top_k=request.top_k)
+            if expanded:
+                items = items + expanded
     except Exception:
         items, diagnostics = _mock_search(request)
         diagnostics.warnings.append("engine unavailable, fallback to mock")
@@ -39,6 +51,68 @@ async def search(request: SearchRequest) -> SearchResponse:
     diagnostics.time_ms = elapsed_ms
 
     return SearchResponse(items=items, diagnostics=diagnostics, layered_recommendations=layered_recs)
+
+
+def _expand_return_chain(
+    items: list[KnowledgeItem], top_k: int = 5,
+) -> list[KnowledgeItem]:
+    """展开 entry_point 方法的返回值类型方法。
+
+    例如: FileServiceManager.getSystemService() → FileService
+          自动补充 FileService.uploadFile/downloadFile 等方法到结果中。
+    """
+    entry_types: dict[str, float] = {}  # return_type → best_score
+    for item in items:
+        if not item.meta or not item.meta.role:
+            continue
+        if item.meta.role != "entry_point":
+            continue
+        rt = (item.meta.return_type or "").strip()
+        if not rt or rt in _SKIP_RETURN_TYPES:
+            continue
+        if rt not in entry_types or item.score > entry_types[rt]:
+            entry_types[rt] = item.score
+
+    if not entry_types:
+        return []
+
+    try:
+        from ..engine.backends.lite.entity import LiteEntitySearcher
+        entity_searcher = LiteEntitySearcher()
+        if not entity_searcher.available:
+            return []
+    except Exception:
+        return []
+
+    existing_ids = {item.id for item in items}
+    expanded: list[KnowledgeItem] = []
+
+    for return_type, parent_score in entry_types.items():
+        candidates = entity_searcher.search_entity(return_type)
+        added = 0
+        for c in candidates:
+            chunk = c["chunk"]
+            cid = chunk["id"]
+            if cid in existing_ids:
+                continue
+            existing_ids.add(cid)
+            meta = chunk.get("meta", {})
+            try:
+                kt = KnowledgeType(chunk.get("type", "api"))
+            except ValueError:
+                kt = KnowledgeType.API
+            expanded.append(KnowledgeItem(
+                id=cid,
+                type=kt,
+                content=chunk.get("content", ""),
+                score=round(parent_score * 0.92, 4),  # 间接相关，略低于入口
+                meta=KnowledgeMeta(**meta),
+            ))
+            added += 1
+            if added >= top_k:
+                break
+
+    return expanded
 
 
 def _mock_search(request: SearchRequest) -> tuple[list[KnowledgeItem], Diagnostics]:

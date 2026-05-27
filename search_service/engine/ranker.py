@@ -1,10 +1,16 @@
-"""重排序模块 —— 启发式加权 + 条件层级提升（方案二）。"""
+"""重排序模块 —— 角色/层级加权 + 入口方法加成（方案三）。
+
+策略变化：
+- 角色和层级 boost 无条件生效，不再需要语义阈值验证
+- 高低层差距从 1.6x 扩大到 5x，确保通用查询优先返回入口方法
+- 入口方法有 return_type 时额外加成（gateway 信号）
+"""
 
 from __future__ import annotations
 
 from ..models.schemas import KnowledgeItem, LayeredRecommendation
 
-# 知识类型权重（开发场景：API > 最佳实践 > 缺陷历史 > 安全规则）
+# 知识类型权重
 _TYPE_BOOST: dict[str, float] = {
     "api": 1.0,
     "best_practice": 0.95,
@@ -16,68 +22,33 @@ _TYPE_BOOST: dict[str, float] = {
     "document": 0.90,
 }
 
-# SDK 角色权重（入口 > 公开 API > 内部实现）
+# SDK 角色权重 —— entry_point vs internal 差距 1.8x
 _ROLE_BOOST: dict[str, float] = {
     "entry_point": 1.0,
-    "public_api": 0.92,
-    "internal": 0.80,
+    "public_api": 0.80,
+    "internal": 0.55,
 }
 
-# 层级加权（条件触发时的调整比例）
+# 层级加权 —— high vs low 差距 2.7x
 _LAYER_BOOST: dict[str, float] = {
-    "high": 1.30,   # +30% — 有替代关系的高层推荐
-    "mid": 1.0,      # 不变
-    "low": 0.80,     # -20% — 低层 API 降权（存在高层替代时）
+    "high": 1.50,
+    "mid": 1.0,
+    "low": 0.55,
 }
 
-# 有 standard_context_provider 时的额外加成
-_CONTEXT_PROVIDER_BOOST = 1.10  # +10%
+# 入口方法有返回值类型时额外加成（gateway 信号）
+_GATEWAY_BOOST = 1.15
 
-# 条件层级提升的语义分数阈值
-_SEMANTIC_THRESHOLD = 0.55
-
-
-def _module_overlap(item: KnowledgeItem, query: str) -> bool:
-    """快速领域一致性检查：查询词是否与 item 的模块/包名有交集。"""
-    meta = item.meta
-    if not meta:
-        return False
-    module = (meta.sdk or "").lower()
-    sdk_class = (meta.sdk_class or "").lower()
-    query_lower = query.lower()
-
-    # 模块名或类名中的关键词是否出现在查询中
-    if module:
-        parts = module.replace("-", " ").replace("_", " ").split()
-        for p in parts:
-            if len(p) > 2 and p in query_lower:
-                return True
-    if sdk_class:
-        # 提取包路径的关键部分
-        pkg_parts = sdk_class.split(".")
-        for part in pkg_parts:
-            if len(part) > 2 and part in query_lower:
-                return True
-    return False
-
-
-def _should_apply_layer_boost(item: KnowledgeItem, query: str, threshold: float) -> bool:
-    """判断是否触发条件层级提升。
-
-    条件：
-    1. item.score > threshold（语义相似度达标）
-    2. 通过快速领域一致性检查
-    """
-    if item.score < threshold:
-        return False
-    return _module_overlap(item, query)
+# 无需展开返回值的类型
+_SKIP_RETURN_TYPES = {
+    "void", "int", "long", "float", "double", "boolean", "byte", "short", "char",
+    "String", "Object", "Integer", "Long", "Float", "Double", "Boolean", "Byte", "Short",
+    "Number", "Class", "List", "Map", "Set", "Collection",
+}
 
 
 def _build_layered_recommendations(items: list[KnowledgeItem]) -> list[LayeredRecommendation]:
-    """从已排序的 items 构建顶层分层推荐列表。
-
-    将 high-layer 或存在 suggested_alternative 的 item 提炼为独立推荐项。
-    """
+    """从已排序的 items 构建顶层分层推荐列表。"""
     recommendations: list[LayeredRecommendation] = []
     for item in items:
         meta = item.meta
@@ -108,55 +79,53 @@ def rerank(
 ) -> tuple[list[KnowledgeItem], list[LayeredRecommendation]]:
     """对融合后的候选集重排序并归一化。
 
-    流程：
-    1. 基础加权：类型 boost × 角色 boost
-    2. 关键词命中加成
-    3. 条件层级提升（语义达标 + 领域一致时触发）
+    1. 类型 boost × 角色 boost × 层级 boost（无条件生效）
+    2. 关键字命中加成（与 base score 比例缩放）
+    3. 入口 gateway 加成（有 return_type 的 entry_point）
     4. 归一化到 [0, 1]
-    5. 构建分层推荐列表
     """
     if not items:
         return [], []
 
     query_lower = query.lower()
+    query_words = [w for w in query_lower.split() if len(w) > 1]
+
     for item in items:
         boost = _TYPE_BOOST.get(item.type.value, 0.5)
 
-        # 角色加成（SDK 入口 > 公开 API > 内部实现）
+        # 角色加成
         role = item.meta.role if item.meta and item.meta.role else ""
-        role_boost = _ROLE_BOOST.get(role, 0.90)
-        boost *= role_boost
+        boost *= _ROLE_BOOST.get(role, 0.80)
 
-        # 关键词命中加成
+        # 层级加权（无条件）
+        layer = item.meta.layer if item.meta and item.meta.layer else "mid"
+        layer_mult = _LAYER_BOOST.get(layer, 1.0)
+        # low 层没有高层替代时惩罚减半（可能是合理的底层查询）
+        if layer == "low" and not (item.meta and item.meta.suggested_alternative):
+            layer_mult = 0.78
+        boost *= layer_mult
+
+        # 关键字命中（与 base 比例缩放，而非固定加法）
         content_lower = item.content.lower()
-        keyword_hit = sum(1 for word in query_lower.split() if word in content_lower)
-        boost += keyword_hit * 0.02
+        hit_count = sum(1 for w in query_words if w in content_lower)
+        if hit_count:
+            boost *= 1.0 + hit_count * 0.03
 
-        # 条件层级提升
-        if _should_apply_layer_boost(item, query, _SEMANTIC_THRESHOLD):
-            layer = item.meta.layer if item.meta and item.meta.layer else "mid"
-
-            # Low-Level：有高层替代时才降权
-            if layer == "low" and item.meta and item.meta.suggested_alternative:
-                boost *= _LAYER_BOOST["low"]
-            # High-Level：始终加权
-            elif layer == "high":
-                boost *= _LAYER_BOOST["high"]
-
-            # 有 standard_context_provider 加成
-            if item.meta and item.meta.standard_context_provider:
-                boost *= _CONTEXT_PROVIDER_BOOST
+        # 入口 gateway 加成
+        if role == "entry_point":
+            rt = (item.meta.return_type or "").strip() if item.meta else ""
+            if rt and rt not in _SKIP_RETURN_TYPES:
+                boost *= _GATEWAY_BOOST
 
         item.score = round(item.score * boost, 4)
 
     items.sort(key=lambda x: x.score, reverse=True)
 
-    # 归一化到 [0, 1]
-    if items:
+    # 归一化
+    if items and items[0].score > 1.0:
         max_score = items[0].score
-        if max_score > 1.0:
-            for item in items:
-                item.score = round(item.score / max_score, 4)
+        for item in items:
+            item.score = round(item.score / max_score, 4)
 
     recommendations = _build_layered_recommendations(items)
 

@@ -70,6 +70,10 @@ class LayeredRecommendation(BaseModel):
 class KnowledgeMeta(BaseModel):
     sdk_class: Optional[str] = None
     method: Optional[str] = None
+    return_type: Optional[str] = None
+    return_type_import: Optional[str] = None
+    class_name: Optional[str] = None
+    calls: list[str] = Field(default_factory=list)
     since_version: Optional[str] = None
     deprecated_in: Optional[str] = None
     required_config: list[str] = Field(default_factory=list)

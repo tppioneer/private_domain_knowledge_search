@@ -69,13 +69,17 @@
 - **图遍历检索**（NetworkX / Neo4j）：实体关联关系，代码调用链分析
 - 三路并行（asyncio.gather），各路由 _safe_search 超时保护（300ms）
 
-### P10. 融合排序策略
+### P10. 融合排序策略（v1.4 重大重构）
 - 合并去重：按 ID 去重，保留最高分
-- 三级加权重排序：
+- **五级加权重排序**（均无条件生效）：
   - **类型 boost**：api(1.0) > best_practice(0.95) > document(0.90) > security_rule(0.85) > term(0.80)
-  - **SDK 角色 boost**：entry_point(1.0) > public_api(0.92) > internal(0.80)
-  - **关键词命中加成**：每个命中 +0.02
-- 结果集内相对归一化，min_score 过滤 + Top-K 截断
+  - **SDK 角色 boost**（entry vs internal 差距 3.3x）：entry_point(1.0) > public_api(0.80) > internal(0.55)
+  - **层级 boost**（high vs low 差距 2.7x，无条件生效）：high(1.50) > mid(1.0) > low(0.55)
+  - **入口 gateway 加成**：entry_point + 有 return_type 且非基本类型 → ×1.15
+  - **关键词命中加成**：每个命中 ×1.03（乘法缩放）
+- 公式：`final = score × type × role × layer × gateway × keyword`
+- 归一化到 [0, 1]，min_score 过滤 + Top-K 截断
+- **关键设计**：角色和层级 boost 不再需要语义阈值门控，确保通用查询（如"文件操作"）入口方法优先于底层实现
 
 ### P11. MCP 工具矩阵（6 大工具）
 | 工具 | 用途 | 方向 |
@@ -93,15 +97,22 @@
 ```
 - **安全清洗**：零宽字符过滤、越狱模式检测、Base64/代码注入防护、meta 深度递归清洗
 - **去重**：ID 精确 + 内容相似度(>0.92) + MD5 快速预检
-- **来源分组**：SDK 源码（方法签名子节） vs 文档（参考文档子节）
+- **来源分组**：SDK 源码（方法签名子节，含 import/返回类型/版本号） vs 文档（参考文档子节）
+- **SDK 条目显式标注**：import 路径、返回类型含 `return_type_import` 全限定路径（如 `FileService → import com.xxx.file.FileService`）、SDK 版本号
 - **4 段式结构**：System(角色+规范) → Background(方法签名+参考文档) → User Request → Constraints
 
 ### P13. SDK 角色体系与返回值类型链
-- 三级角色推断（6 条分层规则）：
+- **三级角色推断**（6 条分层规则）：
   - `entry_point`：根包/service 子包 + Factory/Manager/Client 后缀或静态工厂方法
-  - `public_api`：service/api/client 子包
+  - `public_api`：service/api/client 子包，或根包接口/抽象类
   - `internal`：dao/config/impl 子包，或纯 getter/setter 类
-- 返回值类型链分组：entry_point 方法绑定其返回值接口的方法，正向（入口→子方法）+ 反向（"获取此实例"提示）
+- **三级方法层级推断**（6 条规则）：
+  - `high`：entry_point 方法（无条件）；或 Manager/Facade 后缀 + 参数 ≤2 + public 角色
+  - `mid`：service/api/client/facade 子包方法（兜底）
+  - `low`：类名含 impl/internal；或参数含 Context/Request/Config 等复杂对象；或 dao/config 子包
+  - 关键修复：entry_point 接收 Config 等参数是正常工厂模式，不应被误标为 low
+- **返回值类型链分组**：entry_point 方法绑定其返回值接口的方法（`_group_by_return_chain`），正向（入口→子方法）+ 反向（"获取此实例"提示）
+- **返回值链展开**（v1.4）：`_expand_return_chain()` 在搜索阶段自动补全，不再依赖 assemble 工具
 - 条件入口提示：有 entry_point 类时注入 SDK 使用提示
 
 ### P14. 三大应用场景工作流
@@ -112,7 +123,14 @@
 ### P15. 数据预处理管道
 - loader → classifier → chunker → code_parser → orchestrator → 三路索引
 - **文档分块**：语义边界识别 + 重叠窗口，单块 3K-10K 字符
-- **Java AST 解析**：提取 Maven 坐标、public 方法/构造函数、Javadoc、调用链、SDK 角色
+- **Java AST 解析**：
+  - Maven 坐标提取（pom.xml + 版本继承）
+  - public 方法/构造函数 + Javadoc + 调用链（javalang）
+  - **Interface 支持**：`_in_interface()` 检测 interface 上下文，隐式 public 方法不被过滤
+  - **SDK 角色推断**（6 条规则）：entry_point / public_api / internal
+  - **方法层级推断**（6 条规则）：high / mid / low（entry_point 无条件 high）
+  - **返回值 import 解析**：`_extract_imports` + `_resolve_return_type_import` 从源码 import 语句解析返回值全限定路径，写入 `return_type_import` 字段
+  - content 格式：`import {class_fqn};` + `import {return_type_import};`（如有）+ `ClassName.method(params) → returnType`
 - **版本解析链**：.sdk-versions.json → pom.xml 字面量 → 空字符串兜底
 
 ---
@@ -120,17 +138,22 @@
 ## 第四部分：调试问题与解决策略（约 6-7 页）
 
 ### P16. 问题总览
-共 6 个关键问题，分为两类：
+共 11 个关键问题，分为两类：
 
-**Pipeline/引擎层（来自 5 号文档）：**
+**Pipeline/引擎层：**
 
 | # | 问题 | 影响 | 严重程度 |
 |---|------|------|----------|
 | 1 | FTS5 多词查询命中率极低 | 搜索结果几乎全部被过滤 | 严重 |
 | 2 | test 目录代码污染 | 94% 索引数据是测试代码（fastjson） | 中等 |
 | 3 | SDK 角色推断 bug：class_path 误用 | 子包检测失效，角色标注不准 | 中等 |
+| 7 | Interface 类型方法未被索引 | interface 方法被 public 检查过滤 | 严重 |
+| 8 | 通用查询优先返回中低层方法 | 入口方法被同名底层实现挤出 Top-K | 严重 |
+| 9 | FTS5 连字符导致语法错误 | `no such column: sdk` 异常中断检索 | 中等 |
+| 10 | entry_point 被误标为 low | Config 参数触发复杂参数降级规则 | 中等 |
+| 11 | KnowledgeMeta 缺少关键字段 | return_type 等字段在反序列化时丢失 | 中等 |
 
-**MCP/工具层（来自 3 号文档）：**
+**MCP/工具层：**
 
 | # | 问题 | 影响 | 严重程度 |
 |---|------|------|----------|
@@ -188,11 +211,49 @@
   - 双向引用：正向（入口 → 子方法"返回值接口可用方法"列表），反向（子方法标注"获取此实例: XxxManager.xxxMethod()"）
 - **效果**：一次检索即可获得完整调用链，开发者不需要二次检索
 
+### P23. 问题7：Interface 类型方法未被索引
+- **现象**：SDK 中的接口（如 `com.xxx.llm.api.LLM`）定义了 `generate`、`generateStream` 等方法，但全都没有被索引入库
+- **根因**：javalang 解析 interface 方法时不包含 `public` modifier（隐式 public），被 `if "public" not in node.modifiers` 条件过滤
+- **解决**：
+  - 新增 `_in_interface(path)` 检测节点路径中的 `InterfaceDeclaration`
+  - 过滤条件改为 `"public" not in node.modifiers and not _in_interface(path)`
+- **效果**：interface 方法全部正常索引，不再遗漏
+
+### P24. 问题8：通用查询优先返回中低层方法
+- **现象**：用户搜索"文件操作"时，`LocalFileDao.doOperation`（internal/low）和 `FileServiceManager.getSystemService`（entry/high）BM25 得分相近，ranker 无法有效区分，入口方法排到第 6-7 名
+- **根因**：
+  - 角色/层级 boost 差距太小（entry vs internal 仅 1.25x，high vs low 仅 1.6x）
+  - 层级 boost 有条件门控（需要语义阈值 + 领域一致性检查），入口方法可能不触发
+  - entry_point 方法的 Config 参数被误判为复杂参数，方法被标为 low
+- **解决**：
+  - 角色 boost 差距扩大到 3.3x（entry_point:1.0 vs internal:0.55）
+  - 层级 boost 差距扩大到 2.7x（high:1.50 vs low:0.55），无条件生效
+  - 新增入口 gateway 加成：有 return_type 的 entry_point ×1.15
+  - 层级检测修复：entry_point 方法无条件 high
+  - 关键词加成改为乘法缩放（×1.03/keyword），与 base score 成比例
+- **效果**：通用查询下入口方法从 #7 跃升至 #1，底层实现被正确压到列表末尾
+
+### P25. 问题9：FTS5 连字符导致语法错误
+- **现象**：搜索 `huaweicloud-sdk-ecs` 时 SQLite 报错 `no such column: sdk`，检索中断
+- **根因**：FTS5 查询语法中 `-` 是 AND NOT 操作符，`huaweicloud-sdk-ecs` 被解析为列名引用
+- **解决**：`_FTS5_SYNTAX_RE` 加入 `-` 字符，查询消毒时将连字符替换为空格
+- **效果**：`huaweicloud-sdk-ecs` → `huaweicloud OR sdk OR ecs`，正常检索
+
+### P26. 问题10+11：快速修复记录
+
+**问题10 — entry_point 被误标为 low：**
+- `_detect_method_layer` 中 entry_point 检查从复杂参数检查之后移到之前
+- entry_point 接收 Config 是正常的工厂模式，不应降级
+
+**问题11 — KnowledgeMeta 缺少关键字段：**
+- 服务端和 MCP 端 KnowledgeMeta 补齐 `return_type`、`return_type_import`、`class_name`、`calls`
+- 修复前这些字段在 JSON→Pydantic 反序列化时被静默丢弃，导致 ranker 无法读取 return_type
+
 ---
 
 ## 第五部分：总结与展望（约 2-3 页）
 
-### P23. 当前成果
+### P27. 当前成果
 - 完整技术架构设计与文档体系（5 份设计文档）
 - 混合检索引擎实现（BM25 + FAISS + NetworkX，轻量模式可运行）
 - MCP Server 6 工具完整实现
@@ -200,12 +261,12 @@
 - Prompt 组装流水线（安全清洗 → 去重 → 分组 → 组装）
 - 反馈闭环基础设施（数据记录已就绪，权重调整待实现）
 
-### P24. 待完成事项（Roadmap）
+### P28. 待完成事项（Roadmap）
 - **P1 高优先级**：企业私域数据准备、全链路端到端验证
 - **P2 中优先级**：JSON API 文档 loader、Python SDK AST 解析、LLM 文档分类、生产后端部署对接、反馈闭环权重调整、MCP 工具触发率优化
 - **P3 低优先级**：增量更新管道、orchestrator 生产模式适配
 
-### P25. 经验总结
+### P29. 经验总结
 - **渐进式架构**：轻量模式（零依赖）→ 生产模式（Docker 集群），降低试点门槛
 - **优雅降级**：每个环节都有兜底策略（embedding 零向量、search mock 数据、超时不中断）
 - **数据质量优先**：test 过滤、版本管理、角色标注，数据决定最终效果的上限
