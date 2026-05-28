@@ -146,12 +146,13 @@ def discover_pom_modules(repo_dir: str) -> list[dict]:
     return modules
 
 
-def parse_java_file(filepath: str, sdk_meta: dict) -> list[dict]:
+def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = None) -> list[dict]:
     """解析单个 .java 文件，提取所有 public 方法为知识 chunk。
 
     Args:
         filepath: .java 文件路径
         sdk_meta: {"group_id", "artifact_id", "version", "module_name"}
+        annotations: .sdk-annotations.json 内容（可选）
 
     Returns:
         [{id, type, content, title, module, source_path, meta_json, calls[]}]
@@ -205,9 +206,12 @@ def parse_java_file(filepath: str, sdk_meta: dict) -> list[dict]:
     leaf_pkg = package_name.lower().split(".")[-1] if package_name else ""
     class_fqn = f"{package_name}.{class_path}" if package_name else class_path
 
+    # 构建压制信息
+    suppressed_info = _build_suppressed_info(annotations or {}) if annotations else None
+
     # 第二遍：生成 chunk（含层级标注）
     for node, fqn in method_nodes:
-        layer = _detect_method_layer(class_fqn, node.parameters, role, leaf_pkg)
+        layer = _detect_method_layer(class_fqn, node.parameters, role, leaf_pkg, suppressed_info, package_name)
         ctx_deps = _detect_context_dependencies(node.parameters)
         ctx_provider = _detect_standard_context_provider(class_fqn, ctx_deps) if ctx_deps else None
         chunk = _method_to_chunk(
@@ -217,7 +221,7 @@ def parse_java_file(filepath: str, sdk_meta: dict) -> list[dict]:
         chunks.append(chunk)
 
     for node, fqn in constructor_nodes:
-        layer = _detect_method_layer(class_fqn, node.parameters, role, leaf_pkg)
+        layer = _detect_method_layer(class_fqn, node.parameters, role, leaf_pkg, suppressed_info, package_name)
         ctx_deps = _detect_context_dependencies(node.parameters)
         ctx_provider = _detect_standard_context_provider(class_fqn, ctx_deps) if ctx_deps else None
         chunk = _constructor_to_chunk(
@@ -334,11 +338,18 @@ def _detect_method_layer(
     params: list,
     class_role: str,
     leaf_pkg: str,
+    suppressed_info: dict | None = None,
+    package_name: str = "",
 ) -> str:
-    """根据类名、参数复杂度、角色推断方法层级: high | mid | low。
+    """根据类名、参数复杂度、角色推断方法层级: high | mid | low | suppressed。
 
     entry_point 方法无条件 high——工厂/入口方法接收 Config 等复杂参数是正常模式。
+    suppressed 最高优先级：标注的包/类直接压制，search 不可见但 entity 可查。
     """
+    # 0) 压制层 —— 最高优先级，标注直接兜底
+    if suppressed_info and _is_suppressed(package_name, class_name, suppressed_info):
+        return "suppressed"
+
     simple_name = class_name.split(".")[-1].lower()
 
     # 1) Low-Level：类名含 Impl / Internal
@@ -435,13 +446,17 @@ def _all_getters_setters(method_nodes: list[tuple]) -> bool:
     if not method_nodes:
         return False
     import javalang
+    non_static_count = 0
     for node, _ in method_nodes:
+        if "static" in node.modifiers:
+            continue  # 静态 getXxx() 是工厂方法，不是 getter
+        non_static_count += 1
         name = node.name
         if not (name.startswith("get") or name.startswith("set")
                 or name.startswith("is") or name == "toString"
                 or name == "hashCode" or name == "equals"):
             return False
-    return True
+    return non_static_count > 0
 
 
 def _has_static_factory(method_nodes: list[tuple]) -> bool:
@@ -788,6 +803,42 @@ def _resolve_return_type_import(
     return None
 
 
+def _load_annotations(repo_dir: str) -> dict:
+    """加载 .sdk-annotations.json 标注文件。文件不存在时返回 {}。"""
+    path = os.path.join(repo_dir, ".sdk-annotations.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        import json
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            logger.info("loaded annotations from %s", path)
+            return data
+    except Exception:
+        logger.warning("failed to read .sdk-annotations.json: %s", path)
+    return {}
+
+
+def _build_suppressed_info(annotations: dict) -> dict | None:
+    """从标注中提取 suppressed 信息，构建快速查表结构。"""
+    suppressed = annotations.get("suppressed")
+    if not suppressed:
+        return None
+    return {
+        "packages": suppressed.get("packages", []),
+        "classes": set(suppressed.get("classes", [])),
+    }
+
+
+def _is_suppressed(package_name: str, class_fqn: str, info: dict) -> bool:
+    """检查类是否被标注为 suppressed。"""
+    for pkg_prefix in info.get("packages", []):
+        if package_name.startswith(pkg_prefix):
+            return True
+    return class_fqn in info.get("classes", [])
+
+
 def parse_java_repo(repo_dir: str) -> list[dict]:
     """解析 Java 仓库：自动发现 pom 模块 + 提取所有 public 方法。
 
@@ -795,6 +846,7 @@ def parse_java_repo(repo_dir: str) -> list[dict]:
         统一格式的知识 chunk 列表，可直接喂给 orchestrator 索引。
     """
     modules = discover_pom_modules(repo_dir)
+    annotations = _load_annotations(repo_dir)
     if not modules:
         logger.warning("no pom.xml found in %s, trying without SDK metadata", repo_dir)
         modules = [{
@@ -816,7 +868,7 @@ def parse_java_repo(repo_dir: str) -> list[dict]:
             logger.info("module %s: %d java files", mod.get("artifact_id"), len(java_files))
 
         for jf in src_files:
-            chunks = parse_java_file(str(jf), mod)
+            chunks = parse_java_file(str(jf), mod, annotations)
             all_chunks.extend(chunks)
 
     logger.info("total java chunks: %d", len(all_chunks))

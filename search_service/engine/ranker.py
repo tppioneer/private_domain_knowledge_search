@@ -29,11 +29,12 @@ _ROLE_BOOST: dict[str, float] = {
     "internal": 0.55,
 }
 
-# 层级加权 —— high vs low 差距 2.7x
+# 层级加权 —— high vs low 差距 2.7x，suppressed 几乎不可见
 _LAYER_BOOST: dict[str, float] = {
     "high": 1.50,
     "mid": 1.0,
     "low": 0.55,
+    "suppressed": 0.10,
 }
 
 # 入口方法有返回值类型时额外加成（gateway 信号）

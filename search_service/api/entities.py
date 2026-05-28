@@ -49,7 +49,11 @@ def _version_satisfies(version_str: str, op: str, target: tuple[int, ...]) -> bo
 def _build_response(
     name: str, candidates: list[dict], version_req: str | None,
 ) -> EntityDetailResponse | None:
-    """从候选列表中构建最佳 EntityDetailResponse。"""
+    """从候选列表中构建最佳 EntityDetailResponse。
+
+    类名查询（无点）：返回该类的所有方法签名。
+    方法名查询（有点或单方法名）：返回精确匹配的方法。
+    """
     if not candidates:
         return None
 
@@ -66,60 +70,70 @@ def _build_response(
             return None
 
     best = filtered[0]
-    chunk = best["chunk"]
-    meta = chunk.get("meta", {})
-    class_name = meta.get("class_name", "")
-    method = meta.get("method", "")
-    return_type = meta.get("return_type", "")
-    return_type_import = meta.get("return_type_import", "")
-    version = meta.get("version", "")
-    content = chunk.get("content", "")
+    best_chunk = best["chunk"]
+    best_meta = best_chunk.get("meta", {})
+    best_class = best_meta.get("class_name", "")
+    is_class_query = "." not in name
 
-    # 从 content 中提取参数列表（格式: "ClassName.method(type1 param1, type2 param2) → returnType"）
-    params: list[dict] = []
-    params_match = re.search(r"\((.*?)\)", content)
-    if params_match and params_match.group(1):
-        for p in params_match.group(1).split(","):
-            p = p.strip()
-            parts = p.rsplit(" ", 1)
-            if len(parts) == 2:
-                params.append({"type": parts[0], "name": parts[1]})
-            elif p:
-                params.append({"type": p, "name": ""})
+    # 类名查询：收集该类的所有方法
+    if is_class_query and best_class:
+        class_candidates = [
+            c for c in filtered
+            if c["chunk"]["meta"].get("class_name", "") == best_class
+        ]
+    else:
+        class_candidates = [best]
 
-    # 返回值显示：有完整路径用完整路径，否则用简单名
+    # 构建所有方法签名
+    method_sigs, construction_sig = _build_class_methods(class_candidates)
+
+    # 选代表方法（优先构造入口）
+    rep = best
+    for c in class_candidates:
+        if c["chunk"]["meta"].get("construction_pattern"):
+            rep = c
+            break
+
+    rep_chunk = rep["chunk"]
+    rep_meta = rep_chunk.get("meta", {})
+    version = rep_meta.get("version", "")
+    return_type = rep_meta.get("return_type", "")
+    return_type_import = rep_meta.get("return_type_import", "")
     signature_return = return_type_import or return_type
 
-    signature = ""
-    if class_name and method:
-        sig_parts = [f"{class_name}.{method}({params_match.group(1) if params_match else ''})"]
-        if signature_return:
-            sig_parts.append(f" → {signature_return}")
-        signature = "".join(sig_parts)
+    signature = method_sigs if is_class_query else (method_sigs.strip() if method_sigs else rep_chunk.get("content", ""))
 
-    is_api = chunk.get("type") in ("api", "term")  # 两种都可能
+    is_api = rep_chunk.get("type") in ("api", "term")
     entity_type = EntityType.API if is_api else EntityType.TERM
 
-    # 层级字段
-    layer = meta.get("layer")
-    requires_context = meta.get("requires_context_building", False)
-    context_deps = meta.get("context_dependencies", [])
-    context_provider = meta.get("standard_context_provider")
-    suggested_alt = meta.get("suggested_alternative")
+    layer = rep_meta.get("layer")
+    requires_context = rep_meta.get("requires_context_building", False)
+    context_deps = rep_meta.get("context_dependencies", [])
+    context_provider = rep_meta.get("standard_context_provider")
+    suggested_alt = rep_meta.get("suggested_alternative")
     alt_obj = None
     if suggested_alt and isinstance(suggested_alt, dict):
         from ..models.schemas import SuggestedAlternative
         alt_obj = SuggestedAlternative(**suggested_alt)
 
+    # 类查询时 code_example 优先用构造入口
+    code_example = construction_sig or _build_code_example(
+        rep_meta.get("class_name", ""),
+        rep_meta.get("method", ""),
+        _extract_params(rep_chunk.get("content", "")),
+        signature_return or return_type,
+    )
+
     return EntityDetailResponse(
         entity_name=name,
         entity_type=entity_type,
         definition=EntityDefinition(
-            signature=signature or content,
-            parameters=params,
+            signature=signature or rep_chunk.get("content", ""),
+            parameters=_extract_params(rep_chunk.get("content", "")),
             return_type=signature_return or None,
             since_version=version or None,
-            code_example=_build_code_example(class_name, method, params, signature_return or return_type),
+            code_example=code_example,
+            definition_text=f"共 {len(class_candidates)} 个方法" if is_class_query else None,
             layer=layer,
             requires_context_building=requires_context,
             context_dependencies=context_deps,
@@ -127,6 +141,59 @@ def _build_response(
             suggested_alternative=alt_obj,
         ),
     )
+
+
+def _extract_params(content: str) -> list[dict]:
+    """从 content 中提取参数列表。"""
+    params: list[dict] = []
+    m = re.search(r"\((.*?)\)", content)
+    if m and m.group(1):
+        for p in m.group(1).split(","):
+            p = p.strip()
+            parts = p.rsplit(" ", 1)
+            if len(parts) == 2:
+                params.append({"type": parts[0], "name": parts[1]})
+            elif p:
+                params.append({"type": p, "name": ""})
+    return params
+
+
+def _build_class_methods(candidates: list[dict]) -> tuple[str, str | None]:
+    """构建类的方法签名列表和构造入口示例。"""
+    lines: list[str] = []
+    construction: str | None = None
+    for c in candidates:
+        meta = c["chunk"].get("meta", {})
+        content = c["chunk"].get("content", "")
+        class_name = meta.get("class_name", "")
+        method = meta.get("method", "")
+        rt = meta.get("return_type", "")
+        rt_import = meta.get("return_type_import", "")
+        cp = meta.get("construction_pattern", "")
+
+        # 从 content 提取参数部分
+        params_match = re.search(r"\((.*?)\)", content)
+        params_str = params_match.group(1) if params_match else ""
+
+        ret = rt_import or rt
+        line = f"{class_name}.{method}({params_str})"
+        if ret:
+            line += f" → {ret}"
+        lines.append(line)
+
+        # 记录构造入口
+        if cp and not construction:
+            simple = class_name.rsplit(".", 1)[-1] if class_name else ""
+            pnames = [p.rsplit(" ", 1)[-1] for p in params_str.split(",") if p.strip()]
+            pnames_str = ", ".join(pnames)
+            if cp == "builder":
+                construction = f"{simple}.{method}().build()"
+            elif cp == "static_factory":
+                construction = f"{simple}.{method}({pnames_str})"
+            elif cp == "singleton":
+                construction = f"{simple}.{method}()"
+
+    return "\n".join(lines), construction
 
 
 def _build_code_example(

@@ -80,6 +80,8 @@
   - **关键词命中加成**：每个命中 ×1.03（乘法缩放）
 - 公式：`final = score × type × role × layer × gateway × construction × keyword`
 - 归一化到 [0, 1]，min_score 过滤 + Top-K 截断
+- **suppressed 层**（v1.6）：人工标注 `suppressed.packages`/`suppressed.classes` → layer=suppressed → rank 权重 0.10，search 不可见但 entity 可查
+- **entity 类级查询**：`get_entity("ClassName")` 返回该类的所有方法签名
 - **关键设计**：角色和层级 boost 不再需要语义阈值门控，确保通用查询（如"文件操作"）入口方法优先于底层实现
 
 ### P11. MCP 工具矩阵（6 大工具）
