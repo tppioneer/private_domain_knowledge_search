@@ -61,6 +61,8 @@ class LiteVectorSearcher:
 
     def index_vectors(self, ids: list[str], vectors: list[list[float]], metas: list[dict]) -> int:
         """批量索引向量。返回索引数量。维度不匹配时自动重建索引。"""
+        if not vectors:
+            return 0
         self._load()
         import faiss
         import numpy as np

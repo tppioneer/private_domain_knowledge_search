@@ -38,7 +38,7 @@ class ServiceConfig:
 
     # 检索参数
     candidate_multiplier: int = int(os.getenv("CANDIDATE_MULTIPLIER", "3"))  # 每路检索取 top_k * N 候选
-    search_timeout_ms: int = int(os.getenv("SEARCH_TIMEOUT_MS", "300"))
+    search_timeout_ms: int = int(os.getenv("SEARCH_TIMEOUT_MS", "1000"))
 
 
 service_config = ServiceConfig()

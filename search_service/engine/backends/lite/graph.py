@@ -80,20 +80,24 @@ class LiteGraphSearcher:
             return []
 
         query_lower = query.lower()
+        query_terms = [t for t in query_lower.split() if len(t) > 1]
+        if not query_terms:
+            return []
         allowed_types = {t.value for t in knowledge_types} if knowledge_types else None
         candidates: list[tuple[str, float]] = []
 
         for node_id, attrs in self._graph.nodes(data=True):
             content = attrs.get("content", "")
             node_type = attrs.get("type", "")
+            content_lower = content.lower()
 
             if allowed_types and node_type not in allowed_types:
                 continue
 
-            if query_lower in content.lower() or query_lower in node_id.lower():
-                score = 0.85
-                if query_lower in content.lower():
-                    score = 0.90 + 0.05 * min(content.lower().count(query_lower), 3)
+            # 空格分隔的词只要有一个命中即匹配
+            hit_count = sum(1 for t in query_terms if t in content_lower)
+            if hit_count > 0:
+                score = round(0.85 + 0.05 * min(hit_count, 3), 4)
                 candidates.append((node_id, score))
 
         if not candidates:

@@ -4,7 +4,7 @@ import re
 
 # FTS5 查询语法特殊字符 —— 这些字符在 FTS5 MATCH 中有操作符语义，必须去除，
 # 否则 SQLite 会抛出语法错误。
-_FTS5_SYNTAX_RE = re.compile(r"""["*^()~!<>@#$%{}\[\]|:\-]""")
+_FTS5_SYNTAX_RE = re.compile(r"""["*^()~!<>@#$%{}\[\]|:\-,]""")
 
 # FTS5 布尔操作符（仅全大写时有特殊含义，小写化即可作为普通搜索词）
 _FTS5_BOOLEAN_OPS = frozenset({"AND", "OR", "NOT"})

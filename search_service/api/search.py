@@ -68,6 +68,9 @@ def _expand_return_chain(
         if item.meta.role != "entry_point":
             continue
         rt = (item.meta.return_type or "").strip()
+        # 提取泛型中的简单类型名: AsyncInvoker<A, B> → AsyncInvoker
+        if "<" in rt:
+            rt = rt.split("<")[0].strip()
         if not rt or rt in _SKIP_RETURN_TYPES:
             continue
         if rt not in entry_types or item.score > entry_types[rt]:

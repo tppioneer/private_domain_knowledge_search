@@ -165,10 +165,10 @@ def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = No
         return []
 
     try:
-        import javalang
-        tree = javalang.parse.parse(source)
+        from . import _tree_sitter_adapter as ts
+        tree = ts.parse(source)
     except Exception:
-        logger.warning("javalang parse failed: %s (possibly incomplete source)", filepath)
+        logger.warning("parse failed: %s (possibly incomplete source)", filepath)
         return []
 
     chunks: list[dict] = []
@@ -184,17 +184,17 @@ def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = No
     method_nodes: list[tuple] = []
     constructor_nodes: list[tuple] = []
     for path, node in tree:
-        if isinstance(node, javalang.tree.ClassDeclaration):
+        if isinstance(node, ts._ClassDecl):
             class_stack.append(node.name)
-        elif isinstance(node, javalang.tree.InterfaceDeclaration):
+        elif isinstance(node, ts._InterfaceDecl):
             class_stack.append(node.name)
-        elif isinstance(node, javalang.tree.MethodDeclaration):
+        elif isinstance(node, ts._MethodDecl):
             # interface 方法默认 public，不显式包含 public modifier
             if "public" not in node.modifiers and not _in_interface(path):
                 continue
             fqn = ".".join(class_stack[1:] + [node.name])
             method_nodes.append((node, fqn))
-        elif isinstance(node, javalang.tree.ConstructorDeclaration):
+        elif isinstance(node, ts._ConstructorDecl):
             if "public" not in node.modifiers:
                 continue
             fqn = ".".join(class_stack[1:])
@@ -422,11 +422,11 @@ def _detect_construction_pattern(node, return_type: str) -> str:
     Returns:
         "builder" | "static_factory" | "singleton" | "constructor" | ""
     """
-    import javalang
+    from . import _tree_sitter_adapter as ts
     modifiers = node.modifiers if hasattr(node, "modifiers") else []
     is_static = "static" in modifiers
 
-    if isinstance(node, javalang.tree.ConstructorDeclaration):
+    if isinstance(node, ts._ConstructorDecl):
         return "constructor"
 
     if node.name in ("newBuilder", "builder") and is_static:
@@ -445,7 +445,6 @@ def _all_getters_setters(method_nodes: list[tuple]) -> bool:
     """判断所有方法是否都是 getter/setter（isXxx / getXxx / setXxx）。"""
     if not method_nodes:
         return False
-    import javalang
     non_static_count = 0
     for node, _ in method_nodes:
         if "static" in node.modifiers:
@@ -543,12 +542,8 @@ def _clean_javadoc(doc: str) -> str:
 
 
 def _extract_package(tree) -> str:
-    import javalang
     if tree.package:
         return tree.package.name
-    for path, node in tree:
-        if isinstance(node, javalang.tree.PackageDeclaration):
-            return node.name
     return ""
 
 
@@ -708,12 +703,8 @@ def _format_params(params) -> str:
 
 def _extract_calls(method_node) -> list[str]:
     """提取方法体内调用的方法名列表。"""
-    import javalang
-    calls: list[str] = []
-    for _, node in method_node:
-        if isinstance(node, javalang.tree.MethodInvocation):
-            calls.append(node.member)
-    return calls
+    from . import _tree_sitter_adapter as ts
+    return ts.extract_calls(method_node)
 
 
 def _make_id(raw: str) -> str:
@@ -722,8 +713,8 @@ def _make_id(raw: str) -> str:
 
 def _in_interface(path: list) -> bool:
     """检查节点路径中是否包含 InterfaceDeclaration（即方法声明在 interface 内部）。"""
-    import javalang
-    return any(isinstance(p, javalang.tree.InterfaceDeclaration) for p in path)
+    from . import _tree_sitter_adapter as ts
+    return any(isinstance(p, ts._InterfaceDecl) for p in path)
 
 
 # java.lang 类型和原始类型，不需要 import
@@ -804,20 +795,36 @@ def _resolve_return_type_import(
 
 
 def _load_annotations(repo_dir: str) -> dict:
-    """加载 .sdk-annotations.json 标注文件。文件不存在时返回 {}。"""
-    path = os.path.join(repo_dir, ".sdk-annotations.json")
-    if not os.path.exists(path):
-        return {}
-    try:
-        import json
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
+    """递归加载 repo_dir 下所有 .sdk-annotations.json 文件并合并。
+
+    每个 SDK 模块可在其 pom.xml 同级放置自己的标注文件。
+    多文件合并策略：entry_points/suppressed.packages/suppressed.classes 取并集。
+    """
+    import json
+    merged: dict = {"entry_points": [], "suppressed": {"packages": [], "classes": []}}
+    root = Path(repo_dir)
+    anno_files = sorted(root.rglob(".sdk-annotations.json"))
+
+    for path in anno_files:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                continue
+            merged.setdefault("entry_points", []).extend(data.get("entry_points", []))
+            sup = data.get("suppressed", {})
+            if isinstance(sup, dict):
+                merged_sup = merged.setdefault("suppressed", {})
+                merged_sup.setdefault("packages", []).extend(sup.get("packages", []))
+                merged_sup.setdefault("classes", []).extend(sup.get("classes", []))
             logger.info("loaded annotations from %s", path)
-            return data
-    except Exception:
-        logger.warning("failed to read .sdk-annotations.json: %s", path)
-    return {}
+        except Exception:
+            logger.warning("failed to read .sdk-annotations.json: %s", path)
+
+    if not anno_files:
+        return {}
+    logger.info("merged %d annotation files", len(anno_files))
+    return merged
 
 
 def _build_suppressed_info(annotations: dict) -> dict | None:

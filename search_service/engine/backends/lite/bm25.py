@@ -83,7 +83,7 @@ class LiteBM25Searcher:
 
         where = " AND ".join(conditions)
         sql = f"""
-            SELECT doc_id, type, content, meta_json, bm25(knowledge_fts, 0,0,0,0) AS score
+            SELECT doc_id, type, content, meta_json, bm25(knowledge_fts, 0,0,1,1,0,0) AS score
             FROM knowledge_fts
             WHERE {where}
             ORDER BY score
