@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 
 from ..config import service_config
@@ -12,16 +11,7 @@ from ..models.schemas import Diagnostics, KnowledgeItem, KnowledgeType, SearchCo
 from .factory import create_bm25_searcher, create_vector_searcher, create_graph_searcher
 from .ranker import rerank
 
-# 混合检索日志，写入项目根目录下的 logs/ 目录
-_log_dir = os.path.join(os.getcwd(), "logs")
-os.makedirs(_log_dir, exist_ok=True)
-_search_logger = logging.getLogger("hybrid_searcher")
-_search_logger.setLevel(logging.INFO)
-_search_logger.propagate = False  # 不输出到控制台
-if not _search_logger.handlers:
-    _fh = logging.FileHandler(os.path.join(_log_dir, "hybrid_search.log"), encoding="utf-8")
-    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-    _search_logger.addHandler(_fh)
+logger = logging.getLogger(__name__)
 
 
 class HybridSearcher:
@@ -86,7 +76,7 @@ class HybridSearcher:
         filtered = [item for item in ranked if item.score >= min_score][:top_k]
 
         # ── 混合检索统计日志 ──
-        _search_logger.info(
+        logger.info(
             "query=%.80s | bm25=%d(%.0fms) vector=%d(%.0fms) graph=%d(%.0fms) "
             "| merged=%d | ranked=%d | final=%d(min_score=%.2f)",
             query,

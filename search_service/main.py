@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -16,6 +18,11 @@ from .api.router import router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 全局日志配置
+    from .logging_config import setup_service_logging
+    setup_service_logging("search_service")
+    logging.getLogger(__name__).info("logging configured, log level=%s", os.getenv('LOG_LEVEL', 'INFO'))
+
     # 启动时预加载 embedding 模型，避免首次请求阻塞
     # 离线环境：设置 EMBEDDING_MODEL_PATH=/path/to/bge-small-zh 指向本地模型
     #            模型不可用时自动降级为零向量，不阻塞启动

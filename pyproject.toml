@@ -14,18 +14,31 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# 轻量模式（本地运行 Search Service，免外部 ES/Milvus/Neo4j）
-lite = [
+# Search Service 运行时依赖（检索读取）
+search = [
     "faiss-cpu>=1.7.0",
     "networkx>=3.0",
     "numpy>=1.24.0",
+    "sentence-transformers>=2.2.0",
+]
+
+# Pipeline 离线索引依赖（数据写入，不依赖 search_service）
+pipeline = [
     "tree-sitter>=0.21.0",
     "tree-sitter-java>=0.21.0",
     "sentence-transformers>=2.2.0",
+    "faiss-cpu>=1.7.0",
+    "networkx>=3.0",
+    "numpy>=1.24.0",
+]
+
+# 全量安装（本地开发一体机 = search + pipeline）
+lite = [
+    "inner-sdk-search-mcp[search,pipeline]",
 ]
 
 [project.scripts]
 inner-sdk-search-mcp = "inner_sdk_search_mcp.server:main"
 
 [tool.setuptools.packages.find]
-include = ["inner_sdk_search_mcp*", "search_service*"]
+include = ["inner_sdk_search_mcp*", "search_service*", "pipeline*"]

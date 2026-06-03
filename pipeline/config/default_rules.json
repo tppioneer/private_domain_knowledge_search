@@ -1,0 +1,21 @@
+{
+  "role_rules": {
+    "sub_pkg_internal": ["dao", "config", "impl", "internal", "model", "dto", "vo"],
+    "sub_pkg_public": ["service", "api", "client", "facade"],
+    "entry_suffixes": ["factory", "manager", "client", "bootstrap", "starter", "builder"]
+  },
+  "layer_rules": {
+    "high_layer_suffixes": ["manager", "facade", "gateway", "helper", "builder", "bootstrap", "starter"],
+    "low_layer_keywords": ["impl", "internal"],
+    "complex_param_keywords": [
+      "context", "request", "response", "session", "config",
+      "configuration", "environment", "applicationcontext"
+    ],
+    "max_high_layer_params": 2
+  },
+  "file_filters": {
+    "exclude_dirs": [".venv", "node_modules", "target", "build", ".git", "__pycache__", ".idea", ".claude"],
+    "include_extensions": null,
+    "exclude_extensions": []
+  }
+}

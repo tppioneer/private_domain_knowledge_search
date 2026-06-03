@@ -146,13 +146,14 @@ def discover_pom_modules(repo_dir: str) -> list[dict]:
     return modules
 
 
-def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = None) -> list[dict]:
+def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = None, rules: dict | None = None) -> list:
     """解析单个 .java 文件，提取所有 public 方法为知识 chunk。
 
     Args:
         filepath: .java 文件路径
         sdk_meta: {"group_id", "artifact_id", "version", "module_name"}
-        annotations: .sdk-annotations.json 内容（可选）
+        annotations: .sdk-annotations.json 内容（可选，模块级）
+        rules: 合并后的 pipeline 规则（可选）
 
     Returns:
         [{id, type, content, title, module, source_path, meta_json, calls[]}]
@@ -171,7 +172,7 @@ def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = No
         logger.warning("parse failed: %s (possibly incomplete source)", filepath)
         return []
 
-    chunks: list[dict] = []
+    chunks: list = []
 
     package_name = _extract_package(tree)
     javadoc_map = _extract_javadocs(source)
@@ -202,17 +203,21 @@ def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = No
 
     # 推断类的角色
     class_path = ".".join(class_stack[1:])
-    role = _detect_class_role(package_name, class_path, method_nodes)
+    _default = _load_default_rules()
+    role_rules = (rules or {}).get("role_rules", _default.get("role_rules", {}))
+    layer_rules = (rules or {}).get("layer_rules", _default.get("layer_rules", {}))
+    role = _detect_class_role(package_name, class_path, method_nodes, role_rules, annotations)
     leaf_pkg = package_name.lower().split(".")[-1] if package_name else ""
     class_fqn = f"{package_name}.{class_path}" if package_name else class_path
 
     # 构建压制信息
     suppressed_info = _build_suppressed_info(annotations or {}) if annotations else None
+    cp_keywords = tuple(layer_rules.get("complex_param_keywords", []))
 
     # 第二遍：生成 chunk（含层级标注）
     for node, fqn in method_nodes:
-        layer = _detect_method_layer(class_fqn, node.parameters, role, leaf_pkg, suppressed_info, package_name)
-        ctx_deps = _detect_context_dependencies(node.parameters)
+        layer = _detect_method_layer(class_fqn, node.parameters, role, leaf_pkg, suppressed_info, package_name, layer_rules)
+        ctx_deps = _detect_context_dependencies(node.parameters, cp_keywords)
         ctx_provider = _detect_standard_context_provider(class_fqn, ctx_deps) if ctx_deps else None
         chunk = _method_to_chunk(
             node, package_name, fqn, sdk_id, version, filepath, javadoc_map, role,
@@ -221,8 +226,8 @@ def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = No
         chunks.append(chunk)
 
     for node, fqn in constructor_nodes:
-        layer = _detect_method_layer(class_fqn, node.parameters, role, leaf_pkg, suppressed_info, package_name)
-        ctx_deps = _detect_context_dependencies(node.parameters)
+        layer = _detect_method_layer(class_fqn, node.parameters, role, leaf_pkg, suppressed_info, package_name, layer_rules)
+        ctx_deps = _detect_context_dependencies(node.parameters, cp_keywords)
         ctx_provider = _detect_standard_context_provider(class_fqn, ctx_deps) if ctx_deps else None
         chunk = _constructor_to_chunk(
             node, package_name, fqn, sdk_id, version, filepath, javadoc_map, role,
@@ -237,25 +242,34 @@ def _detect_class_role(
     package_name: str,
     class_path: str,
     method_nodes: list[tuple],
+    role_rules: dict | None = None,
+    annotations: dict | None = None,
 ) -> str:
     """根据包路径层级 + 类名 + 方法特征推断类在 SDK 中的角色。
 
-    Returns:
-        "entry_point" | "public_api" | "internal"
+    标注的 entry_points 优先级高于启发式推断。
     """
+    rules = role_rules or _load_default_rules().get("role_rules", {})
+    sub_pkg_internal = set(rules.get("sub_pkg_internal", []))
+    sub_pkg_public = set(rules.get("sub_pkg_public", []))
+    entry_suffixes = tuple(rules.get("entry_suffixes", []))
+
     # 从 package_name 提取叶子包（如 com.company.file.dao → dao）
     pkg_parts = package_name.lower().split(".") if package_name else []
     leaf_pkg = pkg_parts[-1] if pkg_parts else ""
 
-    # 子包分类
-    sub_pkg_internal = {"dao", "config", "impl", "internal", "model", "dto", "vo"}
-    sub_pkg_public = {"service", "api", "client", "facade"}
-
     is_root_pkg = leaf_pkg == "" or leaf_pkg == pkg_parts[0] if pkg_parts else True
     is_root = is_root_pkg or leaf_pkg not in (sub_pkg_internal | sub_pkg_public | {"util"})
     simple_name = class_path.split(".")[-1].lower()
+    class_fqn = f"{package_name}.{class_path}" if package_name else class_path
 
-    # 规则 1: 子包明确标记为内部（dao/config/impl/...）
+    # 标注覆盖：声明的 entry_points 无条件生效
+    if annotations:
+        entry_list = annotations.get("entry_points", [])
+        if class_fqn in entry_list:
+            return "entry_point"
+
+    # 规则 1: 子包明确标记为内部
     if leaf_pkg in sub_pkg_internal:
         return "internal"
 
@@ -264,8 +278,6 @@ def _detect_class_role(
         return "internal"
 
     # 规则 3: 类名模式 → 偏向入口
-    entry_suffixes = ("factory", "manager", "client", "bootstrap",
-                       "starter", "builder")
     is_entry_name = simple_name.endswith(entry_suffixes)
     has_static_factory = _has_static_factory(method_nodes)
     has_self_return = _has_self_returning_methods(method_nodes, simple_name)
@@ -302,32 +314,29 @@ def _detect_class_role(
     return "internal"
 
 
-# ── 层级标注（方案一） ──
+# ── 默认配置目录（pipeline/config/） ──
 
-# High-Level 类名后缀
-_HIGH_LAYER_CLASS_SUFFIXES = (
-    "manager", "facade", "gateway", "helper", "builder", "bootstrap", "starter",
-)
-
-# Low-Level 类名关键词
-_LOW_LAYER_CLASS_KEYWORDS = ("impl", "internal")
-
-# 复杂参数类型关键词（需要上下文构建）
-_COMPLEX_PARAM_KEYWORDS = (
-    "context", "request", "response", "session", "config",
-    "configuration", "environment", "applicationcontext",
-)
-
-# 参数数量阈值：超过此值视为复杂 API
-_MAX_HIGH_LAYER_PARAMS = 2
+_CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
 
 
-def _is_complex_param_type(type_name: str) -> bool:
+def _load_default_rules() -> dict:
+    """加载 pipeline/config/default_rules.json 作为全局默认规则。"""
+    path = os.path.join(_CONFIG_DIR, "default_rules.json")
+    return _load_one_json(path) or {}
+
+
+def _load_default_annotations() -> dict:
+    """加载 pipeline/config/default_annotations.json 作为全局默认标注。"""
+    path = os.path.join(_CONFIG_DIR, "default_annotations.json")
+    return _load_one_json(path) or {}
+
+
+def _is_complex_param_type(type_name: str, keywords: tuple = ()) -> bool:
     """判断参数类型是否需要上下文构建（复杂对象）。"""
     if not type_name:
         return False
     lower = type_name.lower()
-    for kw in _COMPLEX_PARAM_KEYWORDS:
+    for kw in keywords:
         if kw in lower:
             return True
     return False
@@ -340,45 +349,53 @@ def _detect_method_layer(
     leaf_pkg: str,
     suppressed_info: dict | None = None,
     package_name: str = "",
+    layer_rules: dict | None = None,
 ) -> str:
     """根据类名、参数复杂度、角色推断方法层级: high | mid | low | suppressed。
 
     entry_point 方法无条件 high——工厂/入口方法接收 Config 等复杂参数是正常模式。
     suppressed 最高优先级：标注的包/类直接压制，search 不可见但 entity 可查。
     """
+    _default = _load_default_rules()
+    rules = layer_rules or _default.get("layer_rules", {})
+    high_suffixes = tuple(rules.get("high_layer_suffixes", []))
+    low_keywords = tuple(rules.get("low_layer_keywords", []))
+    complex_keywords = tuple(rules.get("complex_param_keywords", []))
+    max_params = rules.get("max_high_layer_params", 2)
+    internal_pkgs = set(_default.get("role_rules", {}).get("sub_pkg_internal", []))
+    public_pkgs = set(_default.get("role_rules", {}).get("sub_pkg_public", []))
+
     # 0) 压制层 —— 最高优先级，标注直接兜底
     if suppressed_info and _is_suppressed(package_name, class_name, suppressed_info):
         return "suppressed"
 
     simple_name = class_name.split(".")[-1].lower()
 
-    # 1) Low-Level：类名含 Impl / Internal
-    if any(kw in simple_name for kw in _LOW_LAYER_CLASS_KEYWORDS):
+    # 1) Low-Level：类名含 low layer 关键词
+    if any(kw in simple_name for kw in low_keywords):
         return "low"
 
     # 2) entry_point 无条件 high
     if class_role == "entry_point":
         return "high"
 
-    # 3) High-Level：类名含 Manager / Facade / Gateway / Helper 等
-    is_high_class = simple_name.endswith(_HIGH_LAYER_CLASS_SUFFIXES)
-    has_few_params = len(params) <= _MAX_HIGH_LAYER_PARAMS
+    # 3) High-Level：类名含 high layer 后缀
+    is_high_class = simple_name.endswith(high_suffixes) if high_suffixes else False
+    has_few_params = len(params) <= max_params
 
     if is_high_class and has_few_params and class_role in ("entry_point", "public_api"):
         return "high"
 
-    # 4) Low-Level：参数含复杂对象（Context / Request 等，entry 已排除）
+    # 4) Low-Level：参数含复杂对象（entry 已排除）
     for p in params:
         type_name = p.type.name if p.type else ""
-        if _is_complex_param_type(type_name):
+        if _is_complex_param_type(type_name, complex_keywords):
             return "low"
 
     # 5) 子包辅助判断
-    public_pkgs = {"service", "api", "client", "facade"}
     if leaf_pkg in public_pkgs and not is_high_class:
         return "mid"
 
-    internal_pkgs = {"dao", "config", "impl", "internal", "model", "dto", "vo"}
     if leaf_pkg in internal_pkgs:
         return "low"
 
@@ -386,12 +403,12 @@ def _detect_method_layer(
     return "mid"
 
 
-def _detect_context_dependencies(params) -> list[str]:
+def _detect_context_dependencies(params, keywords: tuple = ()) -> list[str]:
     """检测方法参数中的上下文依赖类型。"""
     deps: list[str] = []
     for p in params:
         type_name = p.type.name if p.type else ""
-        if _is_complex_param_type(type_name):
+        if _is_complex_param_type(type_name, keywords):
             deps.append(type_name)
     return deps
 
@@ -555,33 +572,27 @@ def _method_to_chunk(
     layer: str = "mid",
     context_deps: list[str] | None = None,
     context_provider: str | None = None,
-) -> dict:
+) -> PipelineChunk:
+    from .models import ChunkMeta, PipelineChunk
     params_str = _format_params(node.parameters)
     returns = node.return_type.name if node.return_type else "void"
-
     calls = _extract_calls(node)
     construction = _detect_construction_pattern(node, returns)
 
-    # 完整限定名: package.ClassName.method → 即 import 路径
     fqn = f"{package_name}.{full_method_name}" if package_name else full_method_name
-    class_fqn = fqn.rsplit(".", 1)[0]  # package.ClassName
+    class_fqn = fqn.rsplit(".", 1)[0]
     chunk_id = _make_id(f"{sdk_id}:{fqn}")
 
-    # Javadoc
     line_no = node.position.line if node.position else 0
     javadoc = javadoc_map.get(line_no, "")
 
-    # 返回值类型 import 解析
     imports = imports_map or {}
     return_type_import = _resolve_return_type_import(returns, imports, package_name)
 
-    # content: import + 全限定调用 + 返回类型（消除幻觉）
     content_parts = [f"import {class_fqn};"]
     if return_type_import and return_type_import != class_fqn:
         content_parts.append(f"import {return_type_import};")
-    content_parts.append(
-        f"{class_fqn.split('.')[-1]}.{node.name}({params_str}) → {returns}"
-    )
+    content_parts.append(f"{class_fqn.split('.')[-1]}.{node.name}({params_str}) → {returns}")
     if javadoc:
         content_parts.append("")
         content_parts.append(javadoc)
@@ -589,38 +600,21 @@ def _method_to_chunk(
     title_parts = full_method_name.rsplit(".", 1)
     title = title_parts[-2] + "." + node.name if len(title_parts) == 2 else node.name
 
-    meta = {
-        "knowledge_source": "sdk_code",
-        "sdk": sdk_id,
-        "version": version,
-        "class_name": class_fqn,
-        "method": node.name,
-        "return_type": returns,
-        "calls": calls,
-        "role": role,
-        "layer": layer,
-        "requires_context_building": bool(context_deps),
-    }
-    if return_type_import:
-        meta["return_type_import"] = return_type_import
-    if construction:
-        meta["construction_pattern"] = construction
-    if context_deps:
-        meta["context_dependencies"] = context_deps
-    if context_provider:
-        meta["standard_context_provider"] = context_provider
-    import json
-    meta_json = json.dumps(meta, ensure_ascii=False)
+    meta = ChunkMeta(
+        knowledge_source="sdk_code", sdk=sdk_id, version=version,
+        class_name=class_fqn, method=node.name, return_type=returns,
+        calls=calls, role=role, layer=layer,
+        requires_context_building=bool(context_deps),
+        return_type_import=return_type_import or "",
+        construction_pattern=construction,
+        context_dependencies=context_deps or [],
+        standard_context_provider=context_provider or "",
+    )
 
-    return {
-        "id": chunk_id,
-        "type": "api",
-        "content": "\n".join(content_parts),
-        "title": title,
-        "module": sdk_id,
-        "source_path": filepath,
-        "meta_json": meta_json,
-    }
+    return PipelineChunk(
+        id=chunk_id, type="api", content="\n".join(content_parts),
+        title=title, module=sdk_id, source_path=filepath, meta=meta,
+    )
 
 
 def _constructor_to_chunk(
@@ -630,65 +624,33 @@ def _constructor_to_chunk(
     layer: str = "mid",
     context_deps: list[str] | None = None,
     context_provider: str | None = None,
-) -> dict:
-    """class_path: 包内类路径，如 "sdk.PointsException" 或 "PointsException" """
+) -> PipelineChunk:
+    from .models import ChunkMeta, PipelineChunk
     params_str = _format_params(node.parameters)
     class_simple = class_path.split(".")[-1]
-
     fqn = f"{package_name}.{class_path}" if package_name else class_path
     chunk_id = _make_id(f"{sdk_id}:{fqn}:constructor")
 
     line_no = node.position.line if node.position else 0
     javadoc = javadoc_map.get(line_no, "")
-
-    content_parts = [
-        f"import {fqn};",
-        f"new {class_simple}({params_str})",
-    ]
+    content_parts = [f"import {fqn};", f"new {class_simple}({params_str})"]
     if javadoc:
         content_parts.append("")
         content_parts.append(javadoc)
 
-    meta = {
-        "knowledge_source": "sdk_code",
-        "sdk": sdk_id,
-        "version": version,
-        "class_name": fqn,
-        "method": class_simple,
-        "return_type": class_simple,
-        "role": role,
-        "layer": layer,
-        "requires_context_building": bool(context_deps),
-        "construction_pattern": "constructor",
-    }
-    if context_deps:
-        meta["context_dependencies"] = context_deps
-    if context_provider:
-        meta["standard_context_provider"] = context_provider
-    import json
-    meta_json = json.dumps(meta, ensure_ascii=False)
+    meta = ChunkMeta(
+        knowledge_source="sdk_code", sdk=sdk_id, version=version,
+        class_name=fqn, method=class_simple, return_type=class_simple,
+        role=role, layer=layer, construction_pattern="constructor",
+        requires_context_building=bool(context_deps),
+        context_dependencies=context_deps or [],
+        standard_context_provider=context_provider or "",
+    )
 
-    return {
-        "id": chunk_id,
-        "type": "api",
-        "content": "\n".join(content_parts),
-        "title": f"{class_simple}.constructor",
-        "module": sdk_id,
-        "source_path": filepath,
-        "meta_json": meta_json,
-    }
-    import json
-    meta_json = json.dumps(meta, ensure_ascii=False)
-
-    return {
-        "id": chunk_id,
-        "type": "api",
-        "content": "\n".join(content_parts),
-        "title": f"{class_simple}.constructor",
-        "module": sdk_id,
-        "source_path": filepath,
-        "meta_json": meta_json,
-    }
+    return PipelineChunk(
+        id=chunk_id, type="api", content="\n".join(content_parts),
+        title=f"{class_simple}.constructor", module=sdk_id, source_path=filepath, meta=meta,
+    )
 
 
 def _format_params(params) -> str:
@@ -794,37 +756,64 @@ def _resolve_return_type_import(
     return None
 
 
-def _load_annotations(repo_dir: str) -> dict:
-    """递归加载 repo_dir 下所有 .sdk-annotations.json 文件并合并。
-
-    每个 SDK 模块可在其 pom.xml 同级放置自己的标注文件。
-    多文件合并策略：entry_points/suppressed.packages/suppressed.classes 取并集。
-    """
+def _load_one_json(path: str) -> dict:
+    """安全加载单个 JSON 文件，失败返回 {}。"""
     import json
-    merged: dict = {"entry_points": [], "suppressed": {"packages": [], "classes": []}}
-    root = Path(repo_dir)
-    anno_files = sorted(root.rglob(".sdk-annotations.json"))
-
-    for path in anno_files:
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                continue
-            merged.setdefault("entry_points", []).extend(data.get("entry_points", []))
-            sup = data.get("suppressed", {})
-            if isinstance(sup, dict):
-                merged_sup = merged.setdefault("suppressed", {})
-                merged_sup.setdefault("packages", []).extend(sup.get("packages", []))
-                merged_sup.setdefault("classes", []).extend(sup.get("classes", []))
-            logger.info("loaded annotations from %s", path)
-        except Exception:
-            logger.warning("failed to read .sdk-annotations.json: %s", path)
-
-    if not anno_files:
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        logger.warning("failed to read: %s", path)
         return {}
-    logger.info("merged %d annotation files", len(anno_files))
-    return merged
+
+
+def _load_annotations(module_dir: str, repo_dir: str = "") -> dict:
+    """加载 .sdk-annotations.json —— override 策略，就近覆盖。
+
+    查找链：模块级(pom_dir) → 项目级(repo_dir) → pipeline/config/default_annotations.json
+    不跨模块合并，每个模块的 entry_points/suppressed 互不污染。
+    """
+    candidates = [os.path.join(module_dir, ".sdk-annotations.json")]
+    if repo_dir and repo_dir != module_dir:
+        candidates.append(os.path.join(repo_dir, ".sdk-annotations.json"))
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        data = _load_one_json(path)
+        if data:
+            logger.info("loaded annotations from %s", path)
+            return data
+    return _load_default_annotations()
+
+
+def _load_rules(repo_dir: str) -> dict:
+    """递归加载所有 .sdk-rules.json 并 merge 到全局默认规则上。
+
+    合并策略：list 字段取并集，scalar 字段覆盖。
+    查找范围：repo_dir 下的所有 .sdk-rules.json（按深度排序，越深的优先级越高）。
+    """
+    import copy
+    rules = copy.deepcopy(_load_default_rules())
+    root = Path(repo_dir)
+    rule_files = sorted(root.rglob(".sdk-rules.json"), key=lambda p: len(p.relative_to(root).parts))
+    for path in rule_files:
+        data = _load_one_json(str(path))
+        if not data:
+            continue
+        logger.info("loading rules from %s", path)
+        for section in ("role_rules", "layer_rules", "file_filters"):
+            if section not in data:
+                continue
+            target = rules.setdefault(section, {})
+            for key, val in data[section].items():
+                if isinstance(val, list) and isinstance(target.get(key), list):
+                    for v in val:
+                        if v not in target[key]:
+                            target[key].append(v)
+                elif val is not None:
+                    target[key] = val
+    return rules
 
 
 def _build_suppressed_info(annotations: dict) -> dict | None:
@@ -853,7 +842,12 @@ def parse_java_repo(repo_dir: str) -> list[dict]:
         统一格式的知识 chunk 列表，可直接喂给 orchestrator 索引。
     """
     modules = discover_pom_modules(repo_dir)
-    annotations = _load_annotations(repo_dir)
+    # rules 全局 merge；annotations 按模块 override
+    rules = _load_rules(repo_dir)
+    file_filters = rules.get("file_filters", {})
+    exclude_dirs = set(file_filters.get("exclude_dirs", []))
+    exclude_dirs.add("test")  # 保留 test 目录硬编码排除
+
     if not modules:
         logger.warning("no pom.xml found in %s, trying without SDK metadata", repo_dir)
         modules = [{
@@ -865,18 +859,29 @@ def parse_java_repo(repo_dir: str) -> list[dict]:
     all_chunks: list[dict] = []
     for mod in modules:
         pom_dir = mod.get("pom_dir", repo_dir)
+        # 每模块独立加载 annotations（override 策略）
+        annotations = _load_annotations(pom_dir, repo_dir)
         java_files = list(Path(pom_dir).rglob("*.java"))
-        # 过滤 test 目录（src/test/java）
-        src_files = [jf for jf in java_files if "/test/" not in str(jf).replace("\\", "/")]
+        # 过滤 test 目录 + 配置的排除目录
+        src_files = [
+            jf for jf in java_files
+            if not _path_contains_dir(str(jf), exclude_dirs)
+        ]
         skipped = len(java_files) - len(src_files)
         if skipped:
-            logger.info("module %s: %d java files (%d test skipped)", mod.get("artifact_id"), len(java_files), skipped)
+            logger.info("module %s: %d java files (%d skipped)", mod.get("artifact_id"), len(java_files), skipped)
         else:
             logger.info("module %s: %d java files", mod.get("artifact_id"), len(java_files))
 
         for jf in src_files:
-            chunks = parse_java_file(str(jf), mod, annotations)
+            chunks = parse_java_file(str(jf), mod, annotations, rules)
             all_chunks.extend(chunks)
 
     logger.info("total java chunks: %d", len(all_chunks))
     return all_chunks
+
+
+def _path_contains_dir(path_str: str, exclude_dirs: set) -> bool:
+    """检查文件路径中是否包含需要排除的目录名。"""
+    parts = set(path_str.replace("\\", "/").split("/"))
+    return bool(parts & exclude_dirs)

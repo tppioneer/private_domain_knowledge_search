@@ -10,6 +10,8 @@ import hashlib
 import json
 import re
 
+from .models import ChunkMeta, PipelineChunk
+
 # 中文约 1.5 char/token，英文约 2.5 char/token，按综合 2.0 估算
 _CHARS_PER_TOKEN = 2.0
 _MIN_CHUNK_SIZE = 3000  # ~1500 tokens
@@ -115,26 +117,23 @@ def _build_chunk_dict(
     module: str,
     start_idx: int = 0,
     extra_meta: dict | None = None,
-) -> dict:
-    """构造统一的 chunk 字典。"""
-    meta = {
-        "knowledge_source": "doc",
-        "source": source_path,
-        "type": chunk_type,
-    }
+) -> PipelineChunk:
+    meta = ChunkMeta(
+        knowledge_source="doc",
+        source=source_path,
+    )
     if extra_meta:
-        meta.update(extra_meta)
-
-    return {
-        "id": _make_chunk_id(source_path, start_idx),
-        "type": chunk_type,
-        "content": content,
-        "title": title,
-        "module": module,
-        "source_path": source_path,
-        "tokens": _estimate_tokens(content),
-        "meta_json": json.dumps(meta, ensure_ascii=False),
-    }
+        for k, v in extra_meta.items():
+            setattr(meta, k, v)
+    return PipelineChunk(
+        id=_make_chunk_id(source_path, start_idx),
+        type=chunk_type,
+        content=content,
+        title=title,
+        module=module,
+        source_path=source_path,
+        meta=meta,
+    )
 
 
 def chunk_text(
@@ -143,13 +142,13 @@ def chunk_text(
     title: str = "",
     chunk_type: str = "document",
     module: str = "",
-) -> list[dict]:
+) -> list[PipelineChunk]:
     """将文本切分为 chunk 列表。
 
     - 包含 API 章节的 MD 文档：API 前内容按段落分块，API 内部按 ### 子标题分块
     - 普通文档/代码：按段落分块 + 重叠窗口
     """
-    chunks: list[dict] = []
+    chunks: list[PipelineChunk] = []
     start_idx = 0
 
     api_start = _find_api_section_start(text)
