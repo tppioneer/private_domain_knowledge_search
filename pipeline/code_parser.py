@@ -146,6 +146,60 @@ def discover_pom_modules(repo_dir: str) -> list[dict]:
     return modules
 
 
+def _discover_gradle_modules(repo_dir: str) -> list[dict]:
+    """从 Gradle 项目提取模块信息（build.gradle / build.gradle.kts）。
+
+    按深度排序，模块名从目录名推断。
+    """
+    modules: list[dict] = []
+    root = Path(repo_dir)
+    gradle_files = sorted(
+        list(root.rglob("build.gradle")) + list(root.rglob("build.gradle.kts")),
+        key=lambda p: len(p.relative_to(root).parts),
+    )
+    for gf in gradle_files:
+        module_dir = str(gf.parent)
+        # 跳过根目录本身（settings.gradle 存在的目录）
+        modules.append({
+            "group_id": "",
+            "artifact_id": os.path.basename(module_dir),
+            "version": "",
+            "pom_dir": module_dir,
+            "module_name": os.path.basename(module_dir),
+        })
+    return modules
+
+
+def _discover_flat_module(repo_dir: str) -> list[dict]:
+    """无构建系统的纯目录——整个目录作为一个模块。"""
+    return [{
+        "group_id": "",
+        "artifact_id": os.path.basename(repo_dir.rstrip("/\\")),
+        "version": "",
+        "pom_dir": repo_dir,
+        "module_name": os.path.basename(repo_dir.rstrip("/\\")),
+    }]
+
+
+def discover_modules(repo_dir: str) -> list[dict]:
+    """自动检测项目类型，发现所有代码模块。
+
+    检测优先级: Maven (pom.xml) > Gradle (build.gradle) > 纯目录。
+    """
+    maven = discover_pom_modules(repo_dir)
+    if maven:
+        logger.info("detected Maven project: %d modules", len(maven))
+        return maven
+
+    gradle = _discover_gradle_modules(repo_dir)
+    if gradle:
+        logger.info("detected Gradle project: %d modules", len(gradle))
+        return gradle
+
+    logger.info("no build system detected, treating as flat directory")
+    return _discover_flat_module(repo_dir)
+
+
 def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = None, rules: dict | None = None) -> list:
     """解析单个 .java 文件，提取所有 public 方法为知识 chunk。
 
@@ -841,19 +895,11 @@ def parse_java_repo(repo_dir: str) -> list[dict]:
     Returns:
         统一格式的知识 chunk 列表，可直接喂给 orchestrator 索引。
     """
-    modules = discover_pom_modules(repo_dir)
+    modules = discover_modules(repo_dir)
     # rules 全局 merge；annotations 按模块 override
     rules = _load_rules(repo_dir)
     file_filters = rules.get("file_filters", {})
     exclude_dirs = set(file_filters.get("exclude_dirs", []))
-
-    if not modules:
-        logger.warning("no pom.xml found in %s, trying without SDK metadata", repo_dir)
-        modules = [{
-            "group_id": "", "artifact_id": os.path.basename(repo_dir),
-            "version": "", "module_name": os.path.basename(repo_dir),
-            "pom_dir": repo_dir,
-        }]
 
     all_chunks: list[dict] = []
     # 收集所有子模块的 pom_dir（标准化路径前缀），用于排除父模块重复解析
