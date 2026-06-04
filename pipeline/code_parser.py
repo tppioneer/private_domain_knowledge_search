@@ -220,8 +220,9 @@ def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = No
         return []
 
     try:
-        from . import _tree_sitter_adapter as ts
-        tree = ts.parse(source)
+        from .adapters import parse_source, detect_language
+        lang = detect_language(filepath)
+        tree = parse_source(lang, source)
     except Exception:
         logger.warning("parse failed: %s (possibly incomplete source)", filepath)
         return []
@@ -238,18 +239,18 @@ def parse_java_file(filepath: str, sdk_meta: dict, annotations: dict | None = No
     # 第一遍：收集方法节点信息，用于角色推断
     method_nodes: list[tuple] = []
     constructor_nodes: list[tuple] = []
+    from .adapters.base import _ClassDecl, _InterfaceDecl, _MethodDecl, _ConstructorDecl
     for path, node in tree:
-        if isinstance(node, ts._ClassDecl):
+        if isinstance(node, _ClassDecl):
             class_stack.append(node.name)
-        elif isinstance(node, ts._InterfaceDecl):
+        elif isinstance(node, _InterfaceDecl):
             class_stack.append(node.name)
-        elif isinstance(node, ts._MethodDecl):
-            # interface 方法默认 public，不显式包含 public modifier
+        elif isinstance(node, _MethodDecl):
             if "public" not in node.modifiers and not _in_interface(path):
                 continue
             fqn = ".".join(class_stack[1:] + [node.name])
             method_nodes.append((node, fqn))
-        elif isinstance(node, ts._ConstructorDecl):
+        elif isinstance(node, _ConstructorDecl):
             if "public" not in node.modifiers:
                 continue
             fqn = ".".join(class_stack[1:])
@@ -493,11 +494,11 @@ def _detect_construction_pattern(node, return_type: str) -> str:
     Returns:
         "builder" | "static_factory" | "singleton" | "constructor" | ""
     """
-    from . import _tree_sitter_adapter as ts
+    from .adapters.base import _ConstructorDecl
     modifiers = node.modifiers if hasattr(node, "modifiers") else []
     is_static = "static" in modifiers
 
-    if isinstance(node, ts._ConstructorDecl):
+    if isinstance(node, _ConstructorDecl):
         return "constructor"
 
     if node.name in ("newBuilder", "builder") and is_static:
@@ -719,8 +720,8 @@ def _format_params(params) -> str:
 
 def _extract_calls(method_node) -> list[str]:
     """提取方法体内调用的方法名列表。"""
-    from . import _tree_sitter_adapter as ts
-    return ts.extract_calls(method_node)
+    from .adapters import extract_calls as _ext_calls
+    return _ext_calls("java", method_node)  # 默认 Java，后续按语言分发
 
 
 def _make_id(raw: str) -> str:
@@ -729,8 +730,8 @@ def _make_id(raw: str) -> str:
 
 def _in_interface(path: list) -> bool:
     """检查节点路径中是否包含 InterfaceDeclaration（即方法声明在 interface 内部）。"""
-    from . import _tree_sitter_adapter as ts
-    return any(isinstance(p, ts._InterfaceDecl) for p in path)
+    from .adapters.base import _InterfaceDecl
+    return any(isinstance(p, _InterfaceDecl) for p in path)
 
 
 # java.lang 类型和原始类型，不需要 import
