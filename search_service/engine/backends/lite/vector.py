@@ -45,8 +45,9 @@ class LiteVectorSearcher:
             self._index = faiss.read_index(index_path)
             with open(idmap_path, encoding="utf-8") as f:
                 raw = json.load(f)
-                self._id_map = {int(k): v for k, v in raw.items()}
-                self._next_id = max(self._id_map.keys(), default=0) + 1
+                # pipeline 写入的 key 是 doc_id（hash 字符串），重建为 FAISS 索引序号
+                self._id_map = {i: {"doc_id": k, **v} for i, (k, v) in enumerate(raw.items())}
+                self._next_id = len(self._id_map)
         else:
             self._index = faiss.IndexFlatIP(self._dim)
         self._loaded = True
