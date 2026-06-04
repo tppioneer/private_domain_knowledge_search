@@ -846,7 +846,6 @@ def parse_java_repo(repo_dir: str) -> list[dict]:
     rules = _load_rules(repo_dir)
     file_filters = rules.get("file_filters", {})
     exclude_dirs = set(file_filters.get("exclude_dirs", []))
-    exclude_dirs.add("test")  # 保留 test 目录硬编码排除
 
     if not modules:
         logger.warning("no pom.xml found in %s, trying without SDK metadata", repo_dir)
@@ -857,15 +856,21 @@ def parse_java_repo(repo_dir: str) -> list[dict]:
         }]
 
     all_chunks: list[dict] = []
+    # 收集所有子模块的 pom_dir（标准化路径前缀），用于排除父模块重复解析
+    all_pom_dirs = {m.get("pom_dir", "").replace("\\", "/").rstrip("/") + "/" for m in modules}
     for mod in modules:
         pom_dir = mod.get("pom_dir", repo_dir)
         # 每模块独立加载 annotations（override 策略）
         annotations = _load_annotations(pom_dir, repo_dir)
         java_files = list(Path(pom_dir).rglob("*.java"))
-        # 过滤 test 目录 + 配置的排除目录
+        # 过滤 test 目录 + 配置的排除目录 + 子模块目录
+        my_pom = pom_dir.replace("\\", "/").rstrip("/") + "/"
+        child_dirs = {d for d in all_pom_dirs if d.startswith(my_pom) and d != my_pom}
         src_files = [
             jf for jf in java_files
             if not _path_contains_dir(str(jf), exclude_dirs)
+            and not _is_under_child_module(str(jf), child_dirs)
+            and "/src/test/" not in str(jf).replace("\\", "/")  # 排除 src/test 目录
         ]
         skipped = len(java_files) - len(src_files)
         if skipped:
@@ -879,6 +884,15 @@ def parse_java_repo(repo_dir: str) -> list[dict]:
 
     logger.info("total java chunks: %d", len(all_chunks))
     return all_chunks
+
+
+def _is_under_child_module(file_path: str, pom_dirs: set[str]) -> bool:
+    """检查文件是否在子模块的 pom_dir 下（前缀匹配）。"""
+    normalized = file_path.replace("\\", "/")
+    for d in pom_dirs:
+        if normalized.startswith(d):
+            return True
+    return False
 
 
 def _path_contains_dir(path_str: str, exclude_dirs: set) -> bool:
