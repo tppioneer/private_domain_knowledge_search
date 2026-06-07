@@ -1008,14 +1008,15 @@ def _parse_python_file(filepath: str, sdk_meta: dict, annotations: dict | None =
     try:
         with open(filepath, encoding="utf-8") as f:
             source = f.read()
-    except Exception:
+    except Exception as e:
+        logger.warning("cannot read python file: %s (%s)", filepath, e)
         return []
 
     try:
         from .adapters import parse_source
         tree = parse_source("python", source)
-    except Exception:
-        logger.warning("python parse failed: %s", filepath)
+    except Exception as e:
+        logger.warning("python parse failed: %s (%s)", filepath, e)
         return []
 
     from .adapters.base import _ClassDecl, _MethodDecl
@@ -1119,20 +1120,22 @@ def _discover_ts_module_name(root: Path) -> str:
 
 
 def _parse_typescript_file(filepath: str, sdk_meta: dict, annotations: dict | None = None, rules: dict | None = None) -> list:
-    """解析单个 .ts 文件，提取所有 public 函数和类方法为 PipelineChunk。"""
+    """解析单个 .ts/.tsx 文件，提取所有 public 函数和类方法为 PipelineChunk。"""
     from .models import ChunkMeta, PipelineChunk
 
     try:
         with open(filepath, encoding="utf-8") as f:
             source = f.read()
-    except Exception:
+    except Exception as e:
+        logger.warning("cannot read ts file: %s (%s)", filepath, e)
         return []
 
     try:
         from .adapters import parse_source
-        tree = parse_source("typescript", source)
-    except Exception:
-        logger.warning("typescript parse failed: %s", filepath)
+        is_tsx = filepath.endswith(".tsx")
+        tree = parse_source("typescript", source, tsx=is_tsx)
+    except Exception as e:
+        logger.warning("typescript parse failed: %s (%s)", filepath, e)
         return []
 
     from .adapters.base import _ClassDecl, _ConstructorDecl, _MethodDecl

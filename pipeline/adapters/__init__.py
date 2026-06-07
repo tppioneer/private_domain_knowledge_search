@@ -10,7 +10,7 @@ _LANG_MAP: dict[str, str] = {
 }
 
 
-def parse_source(language: str, source: str):
+def parse_source(language: str, source: str, tsx: bool = False):
     """按语言解析源码，返回 TreeAdapter。"""
     if language == "java":
         from . import java
@@ -20,7 +20,7 @@ def parse_source(language: str, source: str):
         return python.parse(source)
     elif language == "typescript":
         from . import typescript
-        return typescript.parse(source)
+        return typescript.parse(source, tsx=tsx)
     else:
         raise ValueError(f"unsupported language: {language}")
 

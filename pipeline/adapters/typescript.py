@@ -12,7 +12,9 @@ from .base import (
 )
 
 _TS_LANGUAGE = Language(tsts.language_typescript())
+_TSX_LANGUAGE = Language(tsts.language_tsx())
 _PARSER = Parser(_TS_LANGUAGE)
+_PARSER_TSX = Parser(_TSX_LANGUAGE)
 
 _MODIFIER_TYPES = {"public", "private", "protected", "static",
                    "abstract", "readonly", "async", "export", "declare", "default"}
@@ -169,8 +171,9 @@ def _walk_calls(ts_node, calls: list[str]) -> None:
 # ── 公开 API ──
 
 
-def parse(source: str) -> TreeAdapter:
-    ts_tree = _PARSER.parse(source.encode("utf-8"))
+def parse(source: str, tsx: bool = False) -> TreeAdapter:
+    parser = _PARSER_TSX if tsx else _PARSER
+    ts_tree = parser.parse(source.encode("utf-8"))
     return TreeAdapter(ts_tree, _wrap_node)
 
 
