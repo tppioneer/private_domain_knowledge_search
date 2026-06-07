@@ -14,7 +14,7 @@ import sqlite3
 from .loader import load_files
 from .chunker import chunk_text
 from .classifier import classify_document
-from .code_parser import _load_rules, parse_java_repo
+from .code_parser import _load_rules, parse_java_repo, parse_python_repo, parse_typescript_repo
 from .models import ChunkMeta, FileRecord, PipelineChunk
 
 logger = logging.getLogger(__name__)
@@ -185,6 +185,16 @@ def run(data_dir: str, patterns: list[str] | None = None) -> dict:
         logger.info("parsed %d java method chunks", len(java_chunks))
         all_chunks.extend(java_chunks)
 
+    python_chunks = parse_python_repo(data_dir)
+    if python_chunks:
+        logger.info("parsed %d python method chunks", len(python_chunks))
+        all_chunks.extend(python_chunks)
+
+    ts_chunks = parse_typescript_repo(data_dir)
+    if ts_chunks:
+        logger.info("parsed %d typescript method chunks", len(ts_chunks))
+        all_chunks.extend(ts_chunks)
+
     # 3. BM25
     bm25_count = _index_bm25(all_chunks)
     logger.info("bm25 indexed: %d", bm25_count)
@@ -210,8 +220,10 @@ def run(data_dir: str, patterns: list[str] | None = None) -> dict:
 
     return {
         "doc_files": len(files),
-        "doc_chunks": len(all_chunks) - len(java_chunks),
+        "doc_chunks": len(all_chunks) - len(java_chunks) - len(python_chunks) - len(ts_chunks),
         "java_chunks": len(java_chunks),
+        "python_chunks": len(python_chunks),
+        "typescript_chunks": len(ts_chunks),
         "total_chunks": len(all_chunks),
         "indexed_bm25": bm25_count,
         "indexed_vector": vec_count,

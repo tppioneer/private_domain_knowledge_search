@@ -933,6 +933,254 @@ def parse_java_repo(repo_dir: str) -> list[dict]:
     return all_chunks
 
 
+def parse_python_repo(repo_dir: str) -> list:
+    """解析 Python 仓库：发现 Python 源文件并提取 public 函数/类。
+
+    模块发现：pyproject.toml → setup.py → 目录名。
+    只解析 .py 文件，排除 __pycache__ 和 test 目录。
+    """
+    all_chunks: list = []
+    rules = _load_rules(repo_dir)
+    file_filters = rules.get("file_filters", {})
+    exclude_dirs = set(file_filters.get("exclude_dirs", []))
+    exclude_dirs.add("__pycache__")
+
+    # 模块发现：pyproject.toml / setup.py / 目录名
+    root = Path(repo_dir)
+    module_name = _discover_python_module_name(root)
+    mod = {
+        "group_id": "", "artifact_id": module_name, "version": "",
+        "module_name": module_name, "pom_dir": repo_dir,
+    }
+    annotations = _load_annotations(repo_dir, repo_dir)
+
+    py_files = list(root.rglob("*.py"))
+    # 过滤：__pycache__、test、venv、.venv、build、dist
+    src_files = [
+        pf for pf in py_files
+        if not _path_contains_dir(str(pf), exclude_dirs)
+        and "/test/" not in str(pf).replace("\\", "/")
+        and "/tests/" not in str(pf).replace("\\", "/")
+        and ".venv/" not in str(pf).replace("\\", "/")
+        and ".tox/" not in str(pf).replace("\\", "/")
+    ]
+    skipped = len(py_files) - len(src_files)
+    logger.info("module %s: %d python files (%d skipped)", module_name, len(py_files), skipped)
+
+    for pf in src_files:
+        chunks = _parse_python_file(str(pf), mod, annotations, rules)
+        all_chunks.extend(chunks)
+
+    logger.info("total python chunks: %d", len(all_chunks))
+    return all_chunks
+
+
+def _discover_python_module_name(root: Path) -> str:
+    """从 pyproject.toml / setup.py 提取 Python 项目名，无则用目录名。"""
+    for cfg in [root / "pyproject.toml", root / "setup.cfg"]:
+        if cfg.exists():
+            try:
+                for line in cfg.read_text(encoding="utf-8").splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("name "):
+                        name = stripped.split("=", 1)[-1].strip().strip('"').strip("'")
+                        if name:
+                            return name
+            except Exception:
+                pass
+    setup_py = root / "setup.py"
+    if setup_py.exists():
+        try:
+            text = setup_py.read_text(encoding="utf-8")
+            import re
+            m = re.search(r'''name\s*=\s*['"]([^'"]+)['"]''', text)
+            if m:
+                return m.group(1)
+        except Exception:
+            pass
+    return root.resolve().name
+
+
+def _parse_python_file(filepath: str, sdk_meta: dict, annotations: dict | None = None, rules: dict | None = None) -> list:
+    """解析单个 .py 文件，提取所有函数和类方法为 PipelineChunk。"""
+    from .models import ChunkMeta, PipelineChunk
+
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            source = f.read()
+    except Exception:
+        return []
+
+    try:
+        from .adapters import parse_source
+        tree = parse_source("python", source)
+    except Exception:
+        logger.warning("python parse failed: %s", filepath)
+        return []
+
+    from .adapters.base import _ClassDecl, _MethodDecl
+
+    chunks: list = []
+    sdk_id = sdk_meta.get("artifact_id", os.path.basename(os.path.dirname(filepath)))
+    class_stack: list[str] = [os.path.splitext(os.path.basename(filepath))[0]]
+    module_path = _python_module_path(filepath, sdk_meta.get("pom_dir", ""))
+
+    for path, node in tree:
+        if isinstance(node, _ClassDecl):
+            class_stack.append(node.name)
+        elif isinstance(node, _MethodDecl):
+            fqn = ".".join(class_stack[1:] + [node.name])
+            rt = node.return_type.name if node.return_type else ""
+
+            params_str = ", ".join(f"{p.type.name} {p.name}" for p in node.parameters if p.name)
+            content = f"{fqn}({params_str})"
+            if rt:
+                content += f" → {rt}"
+
+            chunk_id = _make_id(f"{sdk_id}:{fqn}")
+            meta = ChunkMeta(
+                knowledge_source="sdk_code", sdk=sdk_id, class_name=module_path,
+                method=node.name, return_type=rt, role="public_api", layer="mid",
+            )
+            chunks.append(PipelineChunk(
+                id=chunk_id, type="api", content=content,
+                title=".".join(class_stack[1:-1] + [node.name]) if len(class_stack) > 2 else node.name,
+                module=sdk_id, source_path=filepath, meta=meta,
+            ))
+
+    return chunks
+
+
+def _python_module_path(filepath: str, repo_dir: str) -> str:
+    """从 .py 文件路径推导 Python 模块路径（如 com.company.service）。"""
+    rel = os.path.relpath(filepath, repo_dir) if repo_dir else filepath
+    rel = rel.replace("\\", "/")
+    for prefix in ("src/main/python/", "src/", ""):
+        if prefix and prefix in rel:
+            rel = rel.split(prefix, 1)[-1]
+            break
+    parts = rel.replace("/", ".").replace(".py", "").split(".")
+    meaningful = [p for p in parts if p and not p.startswith("_")]
+    return ".".join(meaningful) or os.path.splitext(os.path.basename(filepath))[0]
+
+
+def parse_typescript_repo(repo_dir: str) -> list:
+    """解析 TypeScript 仓库：发现 .ts/.tsx 文件并提取 public 函数/类。
+
+    模块发现：package.json → tsconfig.json → 目录名。
+    """
+    all_chunks: list = []
+    rules = _load_rules(repo_dir)
+    file_filters = rules.get("file_filters", {})
+    exclude_dirs = set(file_filters.get("exclude_dirs", []))
+    exclude_dirs.add("__tests__")
+
+    root = Path(repo_dir)
+    module_name = _discover_ts_module_name(root)
+    mod = {
+        "group_id": "", "artifact_id": module_name, "version": "",
+        "module_name": module_name, "pom_dir": repo_dir,
+    }
+    annotations = _load_annotations(repo_dir, repo_dir)
+
+    ts_files = list(root.rglob("*.ts")) + list(root.rglob("*.tsx"))
+    src_files = [
+        tf for tf in ts_files
+        if not _path_contains_dir(str(tf), exclude_dirs)
+        and "__tests__" not in str(tf).replace("\\", "/")
+        and ".spec.ts" not in str(tf)
+        and ".test.ts" not in str(tf)
+        and "node_modules/" not in str(tf).replace("\\", "/")
+    ]
+    skipped = len(ts_files) - len(src_files)
+    logger.info("module %s: %d ts files (%d skipped)", module_name, len(ts_files), skipped)
+
+    for tf in src_files:
+        chunks = _parse_typescript_file(str(tf), mod, annotations, rules)
+        all_chunks.extend(chunks)
+
+    logger.info("total typescript chunks: %d", len(all_chunks))
+    return all_chunks
+
+
+def _discover_ts_module_name(root: Path) -> str:
+    """从 package.json 提取 TypeScript 项目名。"""
+    pkg_json = root / "package.json"
+    if pkg_json.exists():
+        try:
+            import json
+            data = json.loads(pkg_json.read_text(encoding="utf-8"))
+            name = data.get("name", "")
+            if name:
+                return name
+        except Exception:
+            pass
+    return root.resolve().name
+
+
+def _parse_typescript_file(filepath: str, sdk_meta: dict, annotations: dict | None = None, rules: dict | None = None) -> list:
+    """解析单个 .ts 文件，提取所有 public 函数和类方法为 PipelineChunk。"""
+    from .models import ChunkMeta, PipelineChunk
+
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            source = f.read()
+    except Exception:
+        return []
+
+    try:
+        from .adapters import parse_source
+        tree = parse_source("typescript", source)
+    except Exception:
+        logger.warning("typescript parse failed: %s", filepath)
+        return []
+
+    from .adapters.base import _ClassDecl, _ConstructorDecl, _MethodDecl
+
+    chunks: list = []
+    sdk_id = sdk_meta.get("artifact_id", os.path.basename(os.path.dirname(filepath)))
+    class_stack: list[str] = [os.path.splitext(os.path.basename(filepath))[0]]
+    seen_keys: set[tuple] = set()  # 去重
+
+    for path, node in tree:
+        if isinstance(node, _ClassDecl):
+            class_stack.append(node.name)
+        elif isinstance(node, _MethodDecl) or isinstance(node, _ConstructorDecl):
+            mods = node.modifiers if hasattr(node, "modifiers") else []
+
+            # TS: constructor 默认 public；explicit private/protected 才跳过
+            if isinstance(node, _ConstructorDecl) and ("private" in mods or "protected" in mods):
+                continue
+            if isinstance(node, _MethodDecl) and "private" in mods:
+                continue
+
+            cls = ".".join(class_stack[1:])
+            key = (cls, node.name)
+            if key in seen_keys or not node.name:
+                continue
+            seen_keys.add(key)
+
+            fqn = ".".join(class_stack[1:] + [node.name])
+            rt = node.return_type.name if node.return_type else ""
+            params_str = ", ".join(f"{p.type.name} {p.name}" for p in node.parameters if p.name)
+            content = f"{fqn}({params_str})"
+            if rt:
+                content += f" → {rt}"
+
+            chunk_id = _make_id(f"{sdk_id}:{fqn}")
+            meta = ChunkMeta(
+                knowledge_source="sdk_code", sdk=sdk_id, class_name=cls,
+                method=node.name, return_type=rt, role="public_api", layer="mid",
+            )
+            chunks.append(PipelineChunk(
+                id=chunk_id, type="api", content=content,
+                title=".".join(class_stack[1:-1] + [node.name]) if len(class_stack) > 2 else node.name,
+                module=sdk_id, source_path=filepath, meta=meta,
+            ))
+
+    return chunks
+
+
 def _is_under_child_module(file_path: str, pom_dirs: set[str]) -> bool:
     """检查文件是否在子模块的 pom_dir 下（前缀匹配）。"""
     normalized = file_path.replace("\\", "/")
