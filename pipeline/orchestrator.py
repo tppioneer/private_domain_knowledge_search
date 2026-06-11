@@ -123,14 +123,20 @@ def _index_bm25(chunks: list[PipelineChunk], clear: bool = True) -> int:
 # FAISS
 # ═══════════════════════════════════════════════
 
-def _index_vectors(ids: list[str], vectors: list[list[float]], metas: list[dict]) -> int:
-    if not vectors:
-        return 0
+def _index_vectors(ids: list[str], vectors, metas: list[dict]) -> int:
+    """vectors 接受 numpy array 或 list[list[float]]。"""
     import faiss
     import numpy as np
+    if isinstance(vectors, np.ndarray):
+        if vectors.shape[0] == 0:
+            return 0
+        vec_array = vectors.astype(np.float32)
+    else:
+        if not vectors:
+            return 0
+        vec_array = np.array(vectors, dtype=np.float32)
     d = _faiss_dir
     os.makedirs(d, exist_ok=True)
-    vec_array = np.array(vectors, dtype=np.float32)
     index = faiss.IndexFlatIP(vec_array.shape[1])
     index.add(vec_array)
     faiss.write_index(index, os.path.join(d, "vectors.index"))
@@ -280,17 +286,21 @@ def run(
 
     # 4. FAISS
     model = _get_embedding_model()
-    texts = [c.content for c in all_chunks]
     if model:
-        embeddings = model.encode(texts, normalize_embeddings=True)
-        vectors = [e.tolist() for e in embeddings]
+        batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "1000"))
+        texts = [c.content for c in all_chunks]
+        embeddings = model.encode(
+            texts, normalize_embeddings=True,
+            batch_size=batch_size, show_progress_bar=True,
+        )
     else:
-        vectors = [[0.0] * _EMBEDDING_DIM for _ in texts]
+        import numpy as np
+        embeddings = np.zeros((len(all_chunks), _EMBEDDING_DIM), dtype=np.float32)
     ids = [c.id for c in all_chunks]
     metas = [{**{"type": c.type, "content": c.content, "title": c.title,
                   "module": c.module, "source_path": c.source_path},
               **_pick_meta_fields(c.meta)} for c in all_chunks]
-    vec_count = _index_vectors(ids, vectors, metas)
+    vec_count = _index_vectors(ids, embeddings, metas)
     logger.info("vector indexed: %d", vec_count)
 
     # 5. Graph
