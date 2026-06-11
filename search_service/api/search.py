@@ -6,6 +6,7 @@ import time
 
 from fastapi import APIRouter
 
+from ..config import service_config
 from ..models.schemas import Diagnostics, KnowledgeItem, KnowledgeMeta, KnowledgeType, SearchRequest, SearchResponse
 
 router = APIRouter()
@@ -25,7 +26,7 @@ async def search(request: SearchRequest) -> SearchResponse:
     # 试点期：尝试真实引擎，不可用或无结果时降级到 mock
     try:
         from ..engine.hybrid_searcher import HybridSearcher
-        searcher = HybridSearcher()
+        searcher = HybridSearcher(repo=request.repo)
         items, diagnostics, layered_recs = await searcher.search(
             query=request.query,
             context=request.context,
@@ -39,7 +40,7 @@ async def search(request: SearchRequest) -> SearchResponse:
             layered_recs = []
         else:
             # 展开 entry_point 返回值类型的方法链
-            expanded = _expand_return_chain(items, top_k=request.top_k)
+            expanded = _expand_return_chain(items, top_k=request.top_k, repo=request.repo)
             if expanded:
                 items = items + expanded
     except Exception:
@@ -54,7 +55,7 @@ async def search(request: SearchRequest) -> SearchResponse:
 
 
 def _expand_return_chain(
-    items: list[KnowledgeItem], top_k: int = 5,
+    items: list[KnowledgeItem], top_k: int = 5, repo: str = "",
 ) -> list[KnowledgeItem]:
     """展开 entry_point 方法的返回值类型方法。
 
@@ -81,7 +82,9 @@ def _expand_return_chain(
 
     try:
         from ..engine.backends.lite.entity import LiteEntitySearcher
-        entity_searcher = LiteEntitySearcher()
+        from ..engine.factory import _repo_path
+        db = _repo_path(repo, service_config.sqlite_db_path, "knowledge.db")
+        entity_searcher = LiteEntitySearcher(db)
         if not entity_searcher.available:
             return []
     except Exception:

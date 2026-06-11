@@ -37,6 +37,7 @@ from .tools import (
     assemble_prompt_tool,
     get_applicable_spec,
     get_entity_detail,
+    list_knowledge_repos,
     recommend_context,
     report_feedback,
     search_private_knowledge,
@@ -69,7 +70,9 @@ class PrivateKnowledgeMCPServer:
 - 用户问到某个内部API的方法签名、参数、返回值
 - 用户需要了解企业内部编码规范或历史缺陷记录
 
-【触发关键词】内部SDK、私有SDK、自研、工具类、封装、对接、接入、怎么用、方法签名、com.、Factory、Manager、Helper""",
+【触发关键词】内部SDK、私有SDK、自研、工具类、封装、对接、接入、怎么用、方法签名、com.、Factory、Manager、Helper
+
+【仓库筛选】repo 参数可选，指定后只在对应仓库检索；不传则查所有仓库""",
         )
         async def search_private_knowledge_tool(
             query: str,
@@ -78,6 +81,7 @@ class PrivateKnowledgeMCPServer:
             top_k: int = 5,
             min_score: float = 0.7,
             auto_assemble: dict | None = None,
+            repo: str = "",
         ) -> dict:
             ctx = Context(**context) if context else None
             types = [KnowledgeType(t) for t in knowledge_types] if knowledge_types else None
@@ -90,13 +94,13 @@ class PrivateKnowledgeMCPServer:
             ) as mc:
                 mc.set_input(
                     query_len=len(query), top_k=top_k, min_score=min_score,
-                    knowledge_types=knowledge_types, auto_assemble=bool(auto_assemble),
+                    knowledge_types=knowledge_types, auto_assemble=bool(auto_assemble), repo=repo,
                 )
                 with mc.span("remote_search") as span:
                     result = await search_private_knowledge(
                         engine=engine, query=query, context=ctx,
                         knowledge_types=types, top_k=top_k, min_score=min_score,
-                        auto_assemble=aa_config, kb=kb,
+                        auto_assemble=aa_config, kb=kb, repo=repo,
                     )
                     span.meta["item_count"] = len(result.items)
                     span.meta["backend_ms"] = result.diagnostics.backend_ms
@@ -250,6 +254,21 @@ class PrivateKnowledgeMCPServer:
                     estimated_tokens=result.estimated_tokens,
                     truncated=result.truncated_items > 0,
                 )
+            return result.model_dump()
+
+        @s.tool(
+            name="list_knowledge_repos",
+            description="""列出私域知识库中已导入的代码仓库及其统计信息。
+
+【何时调用此工具】
+- 用户询问"有哪些知识库"、"可用的仓库"、"已导入哪些SDK"
+- 用户想知道某个仓库是否已索引
+- 需要确认仓库导入状态
+
+【返回】仓库名、代码路径、主语言、chunk数量、最近索引时间""",
+        )
+        async def list_knowledge_repos_tool() -> dict:
+            result = await list_knowledge_repos(kb=kb)
             return result.model_dump()
 
     async def run(self):

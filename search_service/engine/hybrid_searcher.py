@@ -20,10 +20,11 @@ class HybridSearcher:
     流水线: BM25 | 向量 | 图 → 合并去重 → 重排序 → Top-K 裁剪
     """
 
-    def __init__(self):
-        self.bm25 = create_bm25_searcher()
-        self.vector = create_vector_searcher()
-        self.graph = create_graph_searcher()
+    def __init__(self, repo: str = ""):
+        self.repo = repo
+        self.bm25 = create_bm25_searcher(repo)
+        self.vector = create_vector_searcher(repo)
+        self.graph = create_graph_searcher(repo)
 
     async def search(
         self,

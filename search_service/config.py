@@ -18,6 +18,9 @@ class ServiceConfig:
     faiss_index_dir: str = os.getenv("FAISS_INDEX_DIR", "./data/faiss")
     graph_storage_path: str = os.getenv("GRAPH_STORAGE_PATH", "./data/graph.json")
 
+    # 多仓数据目录
+    repo_data_dir: str = os.getenv("REPO_DATA_DIR", "./data/repos")
+
     # Elastisearch
     es_hosts: list[str] = os.getenv("ES_HOSTS", "").split(",") if os.getenv("ES_HOSTS") else ["http://localhost:9200"]
     es_index: str = os.getenv("ES_INDEX", "private_knowledge")
@@ -34,7 +37,7 @@ class ServiceConfig:
 
     # Embedding 模型
     embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "BAAI/bge-small-zh")
-    embedding_model_path: str = os.getenv("EMBEDDING_MODEL_PATH", "./models")  # 本地路径优先
+    embedding_model_path: str = os.getenv("EMBEDDING_MODEL_PATH", "./models/bge-small-zh")  # 本地路径优先
 
     # 检索参数
     candidate_multiplier: int = int(os.getenv("CANDIDATE_MULTIPLIER", "3"))  # 每路检索取 top_k * N 候选

@@ -223,6 +223,21 @@ class ReportFeedbackResponse(BaseModel):
     feedback_id: str
 
 
+# ── list_knowledge_repos 返回 ──
+
+class RepoItem(BaseModel):
+    name: str = ""
+    path: str = ""
+    language: str = ""
+    chunk_count: int = 0
+    last_indexed: str = ""
+
+
+class ListReposResponse(BaseModel):
+    repos: list[RepoItem] = Field(default_factory=list)
+    total: int = 0
+
+
 # ── 审计日志 ──
 
 class AuditRecord(BaseModel):

@@ -123,6 +123,7 @@ class SearchRequest(BaseModel):
     knowledge_types: Optional[list[KnowledgeType]] = None
     top_k: int = Field(default=5, ge=1, le=10)
     min_score: float = Field(default=0.7, ge=0.0, le=1.0)
+    repo: str = ""  # 多仓：指定仓库名，空串=使用默认路径
 
 
 class SearchResponse(BaseModel):

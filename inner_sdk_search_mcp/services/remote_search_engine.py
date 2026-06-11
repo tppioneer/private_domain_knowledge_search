@@ -33,6 +33,7 @@ class RemoteSearchEngine(SearchEngine):
         knowledge_types: list[KnowledgeType] | None = None,
         top_k: int = 5,
         min_score: float = 0.7,
+        repo: str = "",
     ) -> tuple[list[KnowledgeItem], Diagnostics, list]:
         url = f"{self.base_url}/api/v1/search"
         body: dict = {
@@ -40,6 +41,8 @@ class RemoteSearchEngine(SearchEngine):
             "top_k": top_k,
             "min_score": min_score,
         }
+        if repo:
+            body["repo"] = repo
         if context:
             body["context"] = context.model_dump()
         if knowledge_types:

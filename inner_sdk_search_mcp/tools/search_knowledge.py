@@ -87,6 +87,7 @@ async def search_private_knowledge(
     min_score: float = 0.7,
     auto_assemble: AutoAssembleConfig | None = None,
     kb: KnowledgeBase | None = None,
+    repo: str = "",
 ) -> SearchKnowledgeResponse:
     top_k = min(top_k, 10)
 
@@ -96,6 +97,7 @@ async def search_private_knowledge(
         knowledge_types=knowledge_types,
         top_k=top_k,
         min_score=min_score,
+        repo=repo,
     )
 
     guide = _build_construction_guide(items)

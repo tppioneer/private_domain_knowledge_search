@@ -10,8 +10,10 @@ from ..config import server_config
 from ..models.schemas import (
     EntityDetailResponse,
     EntityType,
+    ListReposResponse,
     PinnedKnowledge,
     ProjectMeta,
+    RepoItem,
     ReportFeedbackResponse,
     SpecItem,
 )
@@ -139,3 +141,15 @@ class RemoteKnowledgeBase(KnowledgeBase):
         except Exception as e:
             _log_error("record_feedback", url, e, f"session={session_id} action={action}")
             return ReportFeedbackResponse(status="failed", feedback_id="")
+
+    async def list_repos(self) -> ListReposResponse:
+        url = f"{self.base_url}/api/v1/repos"
+        try:
+            resp = await self.client.get(url)
+            data = resp.json()
+            repos = [RepoItem(**r) for r in data.get("repos", [])]
+            logger.info("repos listed: %d", len(repos))
+            return ListReposResponse(repos=repos, total=len(repos))
+        except Exception as e:
+            _log_error("list_repos", url, e)
+            return ListReposResponse()

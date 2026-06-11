@@ -11,9 +11,11 @@ from ..models.schemas import (
     ConflictWarning,
     EntityDetailResponse,
     EntityType,
+    ListReposResponse,
     PinnedKnowledge,
     ProjectMeta,
     ReportFeedbackResponse,
+    RepoItem,
     SpecItem,
 )
 
@@ -53,6 +55,10 @@ class KnowledgeBase(ABC):
     ) -> ReportFeedbackResponse:
         ...
 
+    @abstractmethod
+    async def list_repos(self) -> ListReposResponse:
+        ...
+
 
 class MockKnowledgeBase(KnowledgeBase):
     """Mock 实现，用于开发和测试。"""
@@ -88,3 +94,23 @@ class MockKnowledgeBase(KnowledgeBase):
             status="recorded",
             feedback_id=f"fb_{uuid.uuid4().hex[:8]}",
         )
+
+    async def list_repos(self) -> ListReposResponse:
+        # Mock 实现：尝试从本地 registry.json 读取
+        import json, os
+        reg_path = os.path.join(os.getcwd(), "data", "repos", "registry.json")
+        if os.path.exists(reg_path):
+            try:
+                with open(reg_path, encoding="utf-8") as f:
+                    registry = json.load(f)
+                repos = []
+                for name, info in registry.get("repos", {}).items():
+                    repos.append(RepoItem(
+                        name=name, path=info.get("path", ""),
+                        chunk_count=info.get("chunk_count", 0),
+                        last_indexed=info.get("last_indexed", ""),
+                    ))
+                return ListReposResponse(repos=repos, total=len(repos))
+            except Exception:
+                pass
+        return ListReposResponse()

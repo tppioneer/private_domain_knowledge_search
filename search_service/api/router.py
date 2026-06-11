@@ -8,6 +8,7 @@ from .specs import router as specs_router
 from .recommend import router as recommend_router
 from .feedback import router as feedback_router
 from .health import router as health_router
+from .repos import router as repos_router
 
 router = APIRouter()
 
@@ -17,3 +18,4 @@ router.include_router(specs_router, tags=["spec"])
 router.include_router(recommend_router, tags=["recommend"])
 router.include_router(feedback_router, tags=["feedback"])
 router.include_router(health_router, tags=["health"])
+router.include_router(repos_router, tags=["repo"])
